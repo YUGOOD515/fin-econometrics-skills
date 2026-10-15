@@ -1,0 +1,148 @@
+#!/usr/bin/env python3
+"""econkit CLI. Run `python scripts/ek.py <command> -h` for options.
+All commands print JSON; artifacts go to --out-dir (default ./ek_out)."""
+import argparse, json, os, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import warnings
+warnings.filterwarnings("ignore")
+from econkit.common import emit, fail
+from econkit import data as D
+
+
+def model_args(p, need_model=False):
+    p.add_argument("--data", required=True)
+    p.add_argument("--sheet")
+    p.add_argument("--y", required=True)
+    p.add_argument("--x", nargs="+", required=True, help="regressors; L.x / L2.x / D.x need --time")
+    if need_model:
+        p.add_argument("--model", required=True,
+                       help="ols|wls|fgls|prais|corc|2sls|liml|gmm|fe|twfe|re|pooled|logit|probit")
+    p.add_argument("--cov", help="nonrobust|robust(HC1)|hc3|hac|cluster  (defaults: ols=nonrobust, iv=robust, panel=cluster)")
+    p.add_argument("--lags", type=int, help="HAC lags (default Newey-West rule floor(4(T/100)^(2/9)))")
+    p.add_argument("--cluster")
+    p.add_argument("--weights", help="analytic weight column for wls")
+    p.add_argument("--freq", help="frequency-weight column (Stata fweight): rows are expanded")
+    p.add_argument("--het-vars", nargs="+", help="variables in the variance function for fgls (default: x)")
+    p.add_argument("--het-noconst", action="store_true")
+    p.add_argument("--endog", nargs="+")
+    p.add_argument("--instruments", nargs="+")
+    p.add_argument("--time")
+    p.add_argument("--entity")
+    p.add_argument("--query", help="pandas query to subset rows, e.g. \"year>=2000\"")
+    p.add_argument("--noconst", action="store_true")
+    p.add_argument("--label", default=None)
+    p.add_argument("--out-dir", default="ek_out")
+    p.add_argument("--no-plots", action="store_true")
+
+
+def load_model_data(a):
+    df = D.load(a.data, a.sheet)
+    if getattr(a, "freq", None):
+        df = df.loc[df.index.repeat(df[a.freq].astype(int))].reset_index(drop=True)
+    return df
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="ek", description=__doc__)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    p = sub.add_parser("profile", help="describe a dataset and guess its structure")
+    p.add_argument("--data", required=True); p.add_argument("--sheet")
+
+    p = sub.add_parser("transform", help="create variables and save a new dataset")
+    p.add_argument("--data", required=True); p.add_argument("--sheet")
+    p.add_argument("--gen", nargs="+", default=[], help="'lny = log(y)' ...")
+    p.add_argument("--query"); p.add_argument("--out", required=True)
+
+    p = sub.add_parser("diagnose", help="baseline OLS + full diagnostic battery + recommendations")
+    model_args(p)
+    p = sub.add_parser("fit", help="estimate one model")
+    model_args(p, need_model=True)
+    p = sub.add_parser("hausman", help="Hausman FE vs RE")
+    model_args(p)
+
+    p = sub.add_parser("compare", help="side-by-side table of saved fits")
+    p.add_argument("--fits", nargs="+", required=True); p.add_argument("--keep", nargs="+")
+    p.add_argument("--out")
+
+    p = sub.add_parser("report", help="render story.json to single-file HTML")
+    p.add_argument("--story", required=True); p.add_argument("--out", required=True)
+    p.add_argument("--offline", action="store_true", help="inline plotly.js (~4.6MB) instead of CDN")
+
+    p = sub.add_parser("fetch", help="download public data")
+    p.add_argument("source", choices=["fred", "worldbank", "url", "table"])
+    p.add_argument("--series", nargs="+", help="FRED ids or WB indicator codes")
+    p.add_argument("--countries", default="all", help="WB iso codes joined by ';' e.g. CHN;USA")
+    p.add_argument("--start"); p.add_argument("--end")
+    p.add_argument("--url"); p.add_argument("--match"); p.add_argument("--index", type=int, default=0)
+    p.add_argument("--out", required=True)
+
+    a = ap.parse_args()
+    if getattr(a, "label", "x") is None:
+        a.label = (getattr(a, "model", None) or a.cmd) + ("_" + a.cov if getattr(a, "cov", None) else "")
+
+    if a.cmd == "profile":
+        emit({"ok": True, "data": a.data, **D.profile(D.load(a.data, a.sheet))})
+    elif a.cmd == "transform":
+        df = D.load(a.data, a.sheet)
+        df, made = D.transform(df, a.gen)
+        if a.query:
+            df = df.query(a.query)
+        D.save(df, a.out)
+        emit({"ok": True, "out": a.out, "created": made, "shape": list(df.shape)})
+    elif a.cmd == "diagnose":
+        from econkit import diagnose
+        r = diagnose.run(a, load_model_data(a))
+        emit(r, os.path.join(a.out_dir, f"diagnose_{a.label}.json"))
+    elif a.cmd == "fit":
+        from econkit import models
+        out, _, _ = models.fit(a, load_model_data(a))
+        out["saved"] = os.path.join(a.out_dir, "fits", f"{a.label}.json")
+        emit(out, out["saved"])
+    elif a.cmd == "hausman":
+        from econkit import models
+        emit(models.hausman_fe_re(a, load_model_data(a)))
+    elif a.cmd == "compare":
+        F = [json.load(open(f)) for f in a.fits]
+        names = a.keep or list(dict.fromkeys(r["name"] for f in F for r in f["coefs"]))
+        hdr = "| var | " + " | ".join(f"({i+1}) {f['label']}" for i, f in enumerate(F)) + " |"
+        lines = [hdr, "|" + "---|" * (len(F) + 1)]
+        for n in names:
+            cells = []
+            for f in F:
+                r = next((r for r in f["coefs"] if r["name"] == n), None)
+                cells.append(f"{r['coef']:.4f}{r['stars']} ({r['se']:.4f})" if r else "")
+            lines.append(f"| {n} | " + " | ".join(cells) + " |")
+        lines.append("| N | " + " | ".join(str(f["nobs"]) for f in F) + " |")
+        lines.append("| SE | " + " | ".join(f["cov_type"] for f in F) + " |")
+        md = "\n".join(lines)
+        if a.out:
+            open(a.out, "w").write(md)
+        emit({"ok": True, "markdown": md})
+    elif a.cmd == "report":
+        from econkit import report
+        emit(report.render(a.story, a.out, a.offline))
+    elif a.cmd == "fetch":
+        from econkit import fetch
+        if a.source == "fred":
+            df = fetch.fred(a.series, a.start, a.end)
+        elif a.source == "worldbank":
+            df = fetch.worldbank(a.series, a.countries, a.start, a.end)
+        elif a.source == "url":
+            df = fetch.url(a.url)
+        else:
+            df = fetch.html_table(a.url, a.match, a.index)
+        D.save(df, a.out)
+        emit({"ok": True, "out": a.out, **D.profile(df)})
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except SystemExit:
+        raise
+    except Exception as e:  # always answer in JSON so the agent can self-correct
+        import traceback
+        emit({"ok": False, "error": f"{type(e).__name__}: {e}",
+              "trace_tail": traceback.format_exc().strip().splitlines()[-3:]})
+        sys.exit(1)

@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+ek_out/
+analysis/
+.DS_Store

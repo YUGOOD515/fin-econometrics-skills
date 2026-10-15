@@ -1,0 +1,13 @@
+{"case": "hard_grilic", "difficulty": "hard",
+ "golden": {"ols_s_no_iq": 0.1026, "ols_s_with_iq": 0.0619, "tsls_s_iq_instrumented_by_med_kww": 0.0608,
+            "tsls_iq": 0.0139, "first_stage_F_robust": 27.1, "sargan_robust_p": 0.70, "endog_test_p": 0.05},
+ "must_detect": ["endogeneity"],
+ "bonus_detect": ["heteroskedasticity"],
+ "final_cov_ok": ["robust", "HC1", "HC0", "HC3"],
+ "final_model_ok": ["iv_2sls", "iv_liml", "iv_gmm"],
+ "key_var": "s", "key_range": [0.03, 0.10],
+ "conclusion_keywords": ["能力"],
+ "rubric": ["Names ability bias explicitly; shows OLS without iq overstates return (~10%)",
+            "Treats iq as error-ridden proxy and instruments it (med, kww) OR gives a defensible alternative IV design with argued exclusion",
+            "Reports first-stage F, over-id test, endogeneity test, LIML check",
+            "Final return to schooling ~6% with CI; causal language appropriately hedged", "Report renders, story explains 'smart people study more' intuitively"]}

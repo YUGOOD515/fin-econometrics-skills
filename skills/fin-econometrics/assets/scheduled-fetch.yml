@@ -1,0 +1,19 @@
+# Copy to .github/workflows/scheduled-fetch.yml in the data repo.
+name: scheduled-fetch
+on:
+  schedule: [{cron: "0 1 * * *"}]   # daily 01:00 UTC
+  workflow_dispatch: {}
+permissions: {contents: write}
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install -r skills/fin-econometrics/requirements.txt
+      - run: bash fetch.sh            # e.g. python skills/fin-econometrics/scripts/ek.py fetch fred --series DGS10 --out data/dgs10.csv
+      - run: |
+          git config user.name "data-bot"; git config user.email "data-bot@users.noreply.github.com"
+          git add data && git commit -m "data: scheduled update $(date -u +%F)" || echo "no changes"
+          git push

@@ -1,0 +1,11 @@
+{"case": "easy_nerlove", "difficulty": "easy",
+ "golden": {"ols_lnq": 0.7209, "ols_robust_se_lnq": 0.0325, "fgls_lnq_textbook": 0.8759,
+            "notes": "BP/White strongly reject homoskedasticity; RESET rejects (Nerlove: add lnq^2, scale economies fall with size)"},
+ "must_detect": ["heteroskedasticity"],
+ "bonus_detect": ["functional_form"],
+ "final_cov_ok": ["HC1", "HC0", "HC2", "HC3", "robust"],
+ "final_model_ok": ["ols", "wls", "fgls_het"],
+ "key_var": "lnq", "key_range": [0.6, 0.95],
+ "conclusion_keywords": ["规模经济"],
+ "rubric": ["Interprets 1/b_lnq > 1 as increasing returns / economies of scale", "Uses robust SE or WLS/FGLS and explains why",
+            "Bonus: tests homogeneity restriction (lnpl+lnpk+lnpf=1) or adds lnq^2 after RESET", "Report renders with >=2 charts and plain language"]}

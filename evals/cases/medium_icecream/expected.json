@@ -1,0 +1,11 @@
+{"case": "medium_icecream", "difficulty": "medium",
+ "golden": {"ols_temp": 0.00346, "dw": 1.021, "bg_lag1_p": 0.0396, "nw3_se_temp": 0.00044, "pw_rho": 0.80,
+            "dynamic_model": "adding L.temp removes serial correlation (textbook)"},
+ "must_detect": ["autocorrelation"],
+ "bonus_detect": ["nonstationarity"],
+ "final_cov_ok": ["HAC", "kernel", "nonrobust"],
+ "final_model_ok": ["ols", "prais_winsten", "cochrane_orcutt"],
+ "key_var": "temp", "key_range": [0.002, 0.006],
+ "conclusion_keywords": ["气温"],
+ "rubric": ["Detects serial correlation (DW≈1.02, BG)", "Treats via HAC / Prais-Winsten / dynamic lag of temp (best: considers L.temp)",
+            "Does not over-claim price effect (insignificant)", "Small-sample (T=30) caution", "Report renders"]}
