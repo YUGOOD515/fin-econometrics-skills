@@ -18,6 +18,13 @@ def _collect_estimates(run_dir):
             if isinstance(o, list) and o and isinstance(o[0], dict) and "coefs" in o[0]:
                 for e in o:
                     out.append({"N": e.get("N"), "coefs": {k: v for k, v in e["coefs"].items()}, "src": p})
+                    for fs in (e.get("iv") or {}).get("first_stage") or []:  # first stages count as estimates
+                        if isinstance(fs, dict) and isinstance(fs.get("coefs"), dict):
+                            cf = {k: {"coef": v, "se": (fs.get("se") or {}).get(k)} for k, v in fs["coefs"].items()}
+                            for k, v in cf.items():
+                                if v["se"]:
+                                    v["t"] = v["coef"] / v["se"]
+                            out.append({"N": e.get("N"), "coefs": cf, "src": p + " (first stage)"})
             elif isinstance(o, dict) and isinstance(o.get("coefs"), list):
                 out.append({"N": o.get("nobs"), "coefs": {r["name"]: r for r in o["coefs"]}, "src": p})
     return out
@@ -25,6 +32,7 @@ def _collect_estimates(run_dir):
 
 def _match(est, t):
     tol = 0.5 * 10 ** (-t.get("dec", 3)) + 1e-9
+    found = None
     for e in est:
         c = e["coefs"].get(t["var"])
         if not c or c.get("coef") is None or abs(c["coef"] - t["coef"]) > tol:
@@ -33,8 +41,10 @@ def _match(est, t):
             continue
         ok_t = "t" not in t or (c.get("t") is not None and abs(c["t"] - t["t"]) <= 0.011 + 0.005 * abs(t["t"]))
         ok_se = "se" not in t or (c.get("se") is not None and abs(c["se"] - t["se"]) <= tol)
-        return True, ok_t and ok_se, e["src"]
-    return False, False, None
+        if ok_t and ok_se:
+            return True, True, e["src"]
+        found = found or e["src"]  # coefficient matches; keep looking for one whose inference matches too
+    return (True, False, found) if found else (False, False, None)
 
 
 def grade_replication(E, run_dir, res, chk):

@@ -31,8 +31,23 @@ PSM, DID, lags), mechanism and heterogeneity tables. Note the paper's stated con
   {"label": "表5(2) IV", "match": {"id": 7}, "coefs": {"AI": "0.3023***"},
    "stats": {"kp_rk_LM": "40.21", "kp_rk_Wald_F": "25.90", "cd_F": "90.79", "AR_F": "9.27", "r2": "0.80"}}]}
 ```
-`match` keys: `stored` (name from `est store`/`eststo`), `id` (order of estimation), `line`,
-`dep`, `cmd`, `contains` (substring of the command). Stats: `N r2 adj_r2 r2_within pseudo_r2
+`match` keys: `stored` (name from `est store m1` or `eststo m1: reg ...`), `id` (order of estimation;
+`$EK check --list` prints id / line / stored / N / command), `line`, `dep`, `cmd`, `contains`
+(substring of the command), `nth` (n-th hit of the other keys). Per coefficient: `coef`, `se`, `t`
+(z for large-sample estimators). Top-level `"estimates"` (a path or a list) chooses the run(s);
+a target may carry its own `"estimates"`. stdout shows only problem rows; every row is in
+`check_report.json`.
+
+| paper label | stats key |
+|---|---|
+| Kleibergen-Paap rk LM / Anderson canon. corr. LM (iid) | `kp_rk_LM` (alias `anderson_LM`) |
+| Cragg-Donald Wald F | `cd_F` |
+| Kleibergen-Paap rk Wald F | `kp_rk_Wald_F` |
+| Hansen J / Sargan (iid) statistic, p | `hansen_J` (alias `sargan`), `hansen_p` |
+| first-stage F / Sanderson-Windmeijer F (1st endog) | `first_stage_F`, `SW_F` |
+| Anderson-Rubin Wald F | `AR_F` |
+| R² / adj. R² / within R² / pseudo R² | `r2`, `adj_r2`, `r2_within`, `pseudo_r2` |
+First-stage tables often print the **adjusted** R² of `reghdfe` → use `adj_r2`. Stats: `N r2 adj_r2 r2_within pseudo_r2
 kp_rk_LM kp_rk_Wald_F cd_F AR_F hansen_J`. Start with the baseline table, the main IV table and
 one robustness table; add more only if time allows.
 
@@ -71,10 +86,16 @@ Also available: `tempfile/tempvar` + `` `name' `` macros, `xtsum` (overall/betwe
 4. Report what you had to guess. If coefficients match but t-values do not, the SE convention
    differs; say which one reproduces the paper.
 
-Unsupported (warning, not silently skipped): GMM dynamic panels (`xtabond2`), modern DID
-(`csdid`, `did_multiplegt`), `rdrobust`, `synth`, `heckman` (do the two-step by hand: probit →
-`predict xb` → `gen imr = normalden(xb)/normal(xb)` → OLS with `imr`), `bootstrap`, quantile
-panels, spatial models. If a key table needs one, say so and, if feasible, implement the method in a
+Unsupported (warning, not silently skipped): GMM dynamic panels (`xtabond`, `xtabond2`,
+`xtdpdsys`), modern DID (`csdid`, `did_multiplegt`), `rdrobust`, `synth`, `sensemakr`, `boottest`,
+`heckman` (do the two-step by hand: probit → `predict xb` → `gen imr = normalden(xb)/normal(xb)` →
+OLS with `imr`), `bootstrap`, quantile panels, spatial models. Dynamic panels: mark the table
+**未复现** and, if useful, give the Anderson-Hsiao IV as an approximate check
+(`ivreghdfe D.y D.x (LD.y = L2.y), cluster(id)`), labelled "approximate".
+`egen` functions: mean sd sum/total count min max median pctile iqr mode rank group tag std and
+row* (rowmean rowtotal ...). String cluster/FE variables work directly (or `egen g = group(s)`).
+`ivreghdfe ..., small` reproduces `xtivreg, fe` iid SE with t statistics.
+`--cmd` needs shell escaping (`\$X`, `\"`); for globals or more than a few lines write a `.do` file. If a key table needs one, say so and, if feasible, implement the method in a
 short script and label it "approximate".
 
 ## 4. When numbers differ — check in this order
@@ -94,6 +115,10 @@ short script and label it "approximate".
    `keepsingletons`".
 Record every deviation you cannot close, with the most likely reason.
 
+Shortcut for SE conventions: `$EK stata --do analysis.do --est-filter "OT_year" --tag scan --vce-scan
+"iid; robust; cluster ID; cluster city; iid small"` prints a coef/se/t table per variant for every
+matching estimation line (`stata_results.md`).
+
 ## 4b. Always re-estimate under the inference the claim needs
 Even when the numbers match, re-run the key columns with (a) SE clustered at the entity (firm /
 city / country) level if the paper used robust or iid SE, and (b) for IV, the same clustering —
@@ -102,6 +127,11 @@ instrument strength for panel data; report the clustered KP rk Wald F and the AR
 (< ~40, e.g. provinces): say so and suggest wild-cluster bootstrap (`boottest`, not supported).
 
 ## 4c. IV construction checklist
+Run `$EK ivcheck --data d.dta --z Z1 Z2 --x X --y Y --entity id --time year --levels city province
+[--group industry]` first; it answers the questions below mechanically (time invariance,
+variation level → which clustering to add, rank-1 shift-share, variance left after FE, partial
+correlations, closeness to a leave-one-out peer mean, rank of the instrument set).
+With weak instruments quote the AR 95% set (`iv.AR_CI95`), not the Wald CI.
 - **Time-invariant base-year instruments** (1970 books, historical distance) and their lags:
   lags of a time-invariant variable are identical within a unit, so `L3.z L4.z` is one
   instrument (ek warns "dropped as collinear"); with unit FE the instrument is absorbed entirely
@@ -131,7 +161,12 @@ Run with `--keep-dummies` to list the event-time coefficients (factor dummies ar
    Name Callaway-Sant'Anna / Sun-Abraham / de Chaisemartin-D'Haultfœuille (`csdid`,
    `did_multiplegt` are not supported) as the full fix.
 4. Selection into treatment: compare pre-period means of treated vs control; PSM-DID only
-   balances observables.
+   balances observables. Author data often carry the matched-sample flag (`psm_*`, `_weight`,
+   `_support`): reproduce PSM-DID with `if flag==1` instead of re-matching.
+5. Cohorts: `tab first` — if most units are treated in the last one or two years, the TWFE estimate
+   is driven by short-run effects of late adopters; estimate by cohort (`c.treat#i.cohortgrp`) and
+   say so. Event-study base period: papers use either rel = −1 or the earliest (binned) period;
+   match the paper first, then show rel = −1.
 
 ## 5. Judge, not just match
 Replication of numbers ≠ validation of claims. After `ek check`, assess:

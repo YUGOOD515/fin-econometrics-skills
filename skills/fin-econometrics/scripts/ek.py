@@ -88,11 +88,24 @@ def main():
     p.add_argument("--out-dir", default=None,
                    help="default ek_out/stata for --do runs, ek_out/stata/cmd for --cmd-only runs (never overwrites the do-file run)")
     p.add_argument("--tag", help="write to ek_out/stata/<tag>/ (keep several runs side by side)")
+    p.add_argument("--vce-scan", help="re-run every estimation (use with --est-filter) under each SE convention, e.g. "
+                                      "'iid; robust; cluster ID; cluster city; iid small' -> coef/se/t per variant")
+
+    p = sub.add_parser("ivcheck", help="instrument-construction diagnostics for panel IVs")
+    p.add_argument("--data", required=True)
+    p.add_argument("--z", nargs="+", required=True, help="instrument(s)")
+    p.add_argument("--x", help="endogenous regressor")
+    p.add_argument("--y", help="outcome (reduced-form correlation)")
+    p.add_argument("--entity"); p.add_argument("--time")
+    p.add_argument("--absorb", nargs="*", help="FE to partial out (default: entity time)")
+    p.add_argument("--levels", nargs="*", default=[], help="coarser groups to test (city province industry ...)")
+    p.add_argument("--group", help="group for the leave-one-out peer-mean test (e.g. industry)")
 
     p = sub.add_parser("check", help="compare estimates with the paper's reported numbers")
     p.add_argument("--estimates", default=None,
                    help="stata_estimates.json; default: targets.json 'estimates' key, else ek_out/stata/stata_estimates.json")
-    p.add_argument("--targets", required=True, help="targets.json (see econkit/check.py docstring)")
+    p.add_argument("--targets", help="targets.json (see econkit/check.py docstring)")
+    p.add_argument("--list", action="store_true", help="print id/line/stored/cmd/N of the estimates and exit")
     p.add_argument("--out", default=None, help="markdown report path (default next to estimates)")
 
     a = ap.parse_args()
@@ -134,7 +147,8 @@ def main():
         from econkit import models
         emit(models.hausman_fe_re(a, load_model_data(a)))
     elif a.cmd == "compare":
-        F = [json.load(open(f)) for f in a.fits]
+        from econkit.report import load_fit
+        F = [load_fit(f, os.getcwd()) for f in a.fits]  # ek fit json or stata_estimates.json#<stored|id>
         names = a.keep or list(dict.fromkeys(r["name"] for f in F for r in f["coefs"]))
         hdr = "| var | " + " | ".join(f"({i+1}) {f['label']}" for i, f in enumerate(F)) + " |"
         lines = [hdr, "|" + "---|" * (len(F) + 1)]
@@ -142,7 +156,7 @@ def main():
             cells = []
             for f in F:
                 r = next((r for r in f["coefs"] if r["name"] == n), None)
-                cells.append(f"{r['coef']:.4f}{r['stars']} ({r['se']:.4f})" if r else "")
+                cells.append((f"{r['coef']:.4f}{r.get('stars', '')}" + (f" ({r['se']:.4f})" if r.get("se") is not None else "")) if r else "")
             lines.append(f"| {n} | " + " | ".join(cells) + " |")
         lines.append("| N | " + " | ".join(str(f["nobs"]) for f in F) + " |")
         lines.append("| SE | " + " | ".join(f["cov_type"] for f in F) + " |")
@@ -157,36 +171,46 @@ def main():
         if not a.out_dir:
             a.out_dir = os.path.join("ek_out", "stata", a.tag) if a.tag else ("ek_out/stata" if a.do else "ek_out/stata/cmd")
         res, _ = stata.run(do=a.do, cmds=a.stata_cmd, data=a.data, data_dirs=a.data_dir, out_dir=a.out_dir,
-                           est_filter=a.est_filter, keep_dummies=a.keep_dummies)
+                           est_filter=a.est_filter, keep_dummies=a.keep_dummies, vce_scan=a.vce_scan)
         if a.quiet:
             res.pop("estimates", None)
         emit(res)
+    elif a.cmd == "ivcheck":
+        from econkit import ivcheck
+        emit({"ok": True, **ivcheck.run(D.load(a.data), a.z, a.x, a.y, a.entity, a.time, a.absorb, a.levels, a.group)})
     elif a.cmd == "check":
         from econkit import check
-        if not a.estimates:
+        if not a.estimates and a.targets:
             tj = json.load(open(a.targets, encoding="utf-8"))
             e = tj.get("estimates") if isinstance(tj, dict) else None
-            if e and not os.path.isabs(e) and not os.path.exists(e):
-                e = os.path.join(os.path.dirname(os.path.abspath(a.targets)), e)
-            a.estimates = e or "ek_out/stata/stata_estimates.json"
-        if not os.path.exists(a.estimates):
+            rel = lambda x: x if (os.path.isabs(x) or os.path.exists(x)) else os.path.join(os.path.dirname(os.path.abspath(a.targets)), x)
+            a.estimates = ([rel(x) for x in e] if isinstance(e, list) else rel(e)) if e else None
+        a.estimates = a.estimates or "ek_out/stata/stata_estimates.json"
+        files = a.estimates if isinstance(a.estimates, list) else [a.estimates]
+        missing = [f for f in files if not os.path.exists(f)]
+        if missing:
             import glob as _g
             cands = sorted(_g.glob("ek_out/stata/**/stata_estimates.json", recursive=True), key=os.path.getmtime)
-            fail(f"estimates file not found: {a.estimates}", candidates=cands)
+            fail(f"estimates file not found: {missing}", candidates=cands)
+        if a.list:
+            emit({"ok": True, "estimates": check.listing(check.load_estimates(a.estimates))}); return
+        if not a.targets:
+            fail("give --targets targets.json (or --list)")
         res, md = check.run(a.estimates, a.targets)
-        res["estimates_file"] = os.path.abspath(a.estimates)
-        ri = os.path.join(os.path.dirname(os.path.abspath(a.estimates)), "run_info.json")
+        res["estimates_file"] = [os.path.abspath(f) for f in files] if len(files) > 1 else os.path.abspath(files[0])
+        ri = os.path.join(os.path.dirname(os.path.abspath(files[0])), "run_info.json")
         if os.path.exists(ri):
             res["estimates_run"] = json.load(open(ri, encoding="utf-8"))
-        md = md.replace("# Replication check\n", f"# Replication check\n\nestimates: `{a.estimates}`\n", 1)
+        md = md.replace("# Replication check\n", f"# Replication check\n\nestimates: `{', '.join(files)}`\n", 1)
+        a.estimates = files[0]
         out = a.out or os.path.join(os.path.dirname(os.path.abspath(a.estimates)), "check_report.md")
         open(out, "w", encoding="utf-8").write(md)
         jp = os.path.splitext(out)[0] + ".json"
         json.dump(res, open(jp, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
         res["report_md"], res["report_json"] = out, jp
-        bad = [r for r in res["rows"] if r["status"] in ("differs", "missing")]
+        bad = [r for r in res["rows"] if r["status"] in ("differs", "missing") or r.get("note") or r.get("hint")]
         res["rows"] = bad[:40]  # only problems on stdout; full table in report_md
-        res["rows_note"] = "only differing/missing rows shown; see report_md for all"
+        res["rows_note"] = "stdout shows only problem rows; all rows are in report_json / report_md"
         emit(res)
     elif a.cmd == "report":
         from econkit import report

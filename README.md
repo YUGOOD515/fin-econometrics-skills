@@ -24,6 +24,11 @@ Two modes:
 - `ek check` — compares estimates with the paper's printed numbers (keeps the paper's rounding and
   stars) and returns a verdict: replicated / largely / partially / not replicated, plus
   sign-and-significance agreement.
+- `ek stata --vce-scan` — re-runs each estimation under several SE conventions (iid / robust /
+  cluster levels / small) to find the paper's and to test the claim under the right one.
+- `ek ivcheck` — instrument-construction diagnostics (time invariance, variation level, rank-1
+  shift-share, variance left after FE, leave-one-out peer means); IV output adds Stock-Yogo flags
+  and Anderson-Rubin confidence sets.
 - `ek profile/transform/diagnose/fit/compare/hausman/report/fetch` — the independent-analysis
   pipeline: OLS, robust/HAC/cluster SE, WLS/FGLS, Prais-Winsten/Cochrane-Orcutt, 2SLS/LIML/GMM,
   panel FE/RE/TWFE with Hausman, logit/probit with marginal effects, ADF/KPSS/Engle-Granger, RESET,
@@ -31,7 +36,9 @@ Two modes:
 
 Validated against six published Chinese empirical papers (中国工业经济 / 世界经济) with the authors'
 data and code: all checked coefficients, t/SE, N, R² and IV statistics match the published tables
-or Stata logs at the printed precision (see `evals/RESULTS-v0.2.md`).
+or Stata logs at the printed precision. In blind evals (paper + data, with or without code) both
+Sonnet 5.5 and DeepSeek V4.1 Flash replicated every target table and correctly judged that the
+conclusions were only partly supported (see `evals/RESULTS-v0.2.md`).
 
 ## Install
 ```bash

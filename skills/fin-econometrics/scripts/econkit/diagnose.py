@@ -147,6 +147,30 @@ def run(a, df):
             except Exception as ex:
                 T["engle_granger"] = {"error": str(ex)}
 
+    if panel:  # Wooldridge (2002) test for AR(1) in panel errors + within-unit persistence
+        try:
+            import statsmodels.api as _sm
+            P = d[[a.entity, a.time, a.y, *a.x]].dropna().sort_values([a.entity, a.time]).copy()
+            g = P.groupby(a.entity)
+            consec = (P[a.time] - g[a.time].shift(1)) == 1
+            D_ = P[[a.y, *a.x]].astype(float) - g[[a.y, *a.x]].shift(1).astype(float)
+            ok = consec & D_.notna().all(axis=1)
+            fd = _sm.OLS(D_.loc[ok, a.y], D_.loc[ok, list(a.x)]).fit()
+            P.loc[ok, "_e"] = fd.resid
+            P["_e1"] = P.groupby(a.entity)["_e"].shift(1)
+            c2 = ((P[a.time] - P.groupby(a.entity)[a.time].shift(1)) == 1) & P["_e"].notna() & P["_e1"].notna()
+            w = _sm.OLS(P.loc[c2, "_e"], P.loc[c2, ["_e1"]]).fit(cov_type="cluster", cov_kwds={"groups": P.loc[c2, a.entity]})
+            F = float(((w.params["_e1"] + 0.5) / w.bse["_e1"]) ** 2)
+            G = int(P.loc[c2, a.entity].nunique())
+            pw = float(stats.f.sf(F, 1, max(G - 1, 1)))
+            yd = P[a.y].astype(float) - g[a.y].transform("mean")
+            rho_y = float(pd.Series(yd.values).corr(pd.Series(yd.groupby(P[a.entity]).shift(1).values)))
+            T["panel_serial_correlation"] = {"wooldridge_F": F, "df": [1, G - 1], "p": pw, "within_unit_ar1_y": rho_y,
+                                             "note": "H0: no first-order autocorrelation in the idiosyncratic errors"}
+            auto = auto or pw < ALPHA
+        except Exception as ex:
+            T["panel_serial_correlation"] = {"error": str(ex)[:160]}
+
     # ---- endogeneity (only when user/agent specified suspects + instruments)
     if a.endog and a.instruments:
         from .models import fit_iv
@@ -212,6 +236,12 @@ def run(a, df):
     if T["influence"]["n_influential"] > max(3, 0.05 * n):
         add("influential_obs", "low", f"{T['influence']['n_influential']} obs with Cook's D > 4/n",
             "inspect top rows; re-estimate without them as robustness (never silently delete)", "", "decision-rules.md#outliers")
+    psc = T.get("panel_serial_correlation", {})
+    if panel and psc.get("p") is not None and psc["p"] < ALPHA:
+        add("panel_serial_correlation", "high",
+            f"Wooldridge F={psc['wooldridge_F']:.2f}, p={psc['p']:.3g}; within-unit AR(1) of y={psc['within_unit_ar1_y']:.2f}",
+            "errors are serially correlated within units: iid/robust SE overstate precision - cluster by entity (or a coarser level)",
+            f"fit --model twfe --cov cluster --cluster {a.entity} {base}", "decision-rules.md#panel")
     if panel:
         add("panel_structure", "high", f"entity={a.entity}, time={a.time}",
             "estimate FE and RE, run Hausman; cluster SE by entity; consider two-way FE",

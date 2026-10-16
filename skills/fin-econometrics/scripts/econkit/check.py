@@ -11,7 +11,9 @@ AR_F hansen_J hansen_p sargan first_stage_F SW_F (first endogenous regressor); a
 Strings keep the paper's rounding: '0.0392***' -> value 0.0392, 4 decimals, stars '***'.
 Per-coefficient fields: coef, se, t (z for large-sample estimators). r2 is the overall R2 Stata prints for
 reg/areg/reghdfe (reghdfe "R-squared"); use r2_within for xtreg fe "within" / reghdfe "Within R-sq.".
-Optional top-level "estimates": "ek_out/stata/<tag>/stata_estimates.json" selects which run to check.
+Optional top-level "estimates": path or list of paths selects which run(s) to check; a target may carry its own
+"estimates" path. match keys: id, stored, line, dep, cmd, contains, nth (n-th hit of the other keys).
+`ek check --list` prints the index (id / line / stored / cmd / N) of an estimates file.
 Verdict: replicated=完全复现 / largely replicated=基本复现 (>=80% exact|close) / partially=部分复现 / not=未能复现.
 """
 import json, re, math
@@ -73,8 +75,25 @@ def find(est, m):
             continue
         if "cmd" in m and r.get("cmd") != m["cmd"]:
             continue
+        if m.get("nth", 1) > 1:  # e.g. {"contains": "ivreg2", "nth": 3}
+            m = dict(m, nth=m["nth"] - 1); continue
         return r
     return None
+
+
+def listing(est):
+    """Short index of the estimates (to write `match` keys)."""
+    return [f"id={r.get('id')} line={r.get('line')} stored={','.join(r.get('stored_as') or []) or '-'} N={r.get('N')} | "
+            f"{(r.get('command') or '')[:110]}" for r in est]
+
+
+def load_estimates(paths):
+    """One path or a list; ids/lines stay per file, so put the file first in `match` via 'file' if needed."""
+    out = []
+    for p in ([paths] if isinstance(paths, str) else paths):
+        for r in json.load(open(p, encoding="utf-8")):
+            r = dict(r); r["_file"] = p; out.append(r)
+    return out
 
 
 def _get(r, path):
@@ -93,26 +112,40 @@ VERDICT_CN = {"replicated": "完全复现", "largely replicated": "基本复现"
 
 
 def n_hint(r, n_paper):
-    """Most likely reason for an N mismatch, from the estimate's bookkeeping."""
+    """Most likely reason for an N mismatch, from the estimate's bookkeeping (shows the arithmetic)."""
     n, sd = int(r.get("N") or 0), int(r.get("singletons_dropped") or 0)
+    nl = int(r.get("N_listwise") or 0)
     if sd and n + sd == n_paper:
-        return f"N + singletons_dropped ({sd}) = paper N: the paper kept singletons -> add keepsingletons (or use areg/xtreg)"
+        return (f"N_listwise({nl or n + sd}) - singletons({sd}) = {n} = your N; paper N = {n_paper} -> the paper kept "
+                "singletons: add keepsingletons (or use areg/xtreg)")
     if sd and n < n_paper:
-        return f"{sd} singletons dropped; try keepsingletons, then check sample filters"
-    if r.get("N_listwise") and int(r["N_listwise"]) != n:
-        return f"listwise N={r['N_listwise']}; check missing values / sample filters (years, winsorization, if conditions)"
-    return "check sample filters, missing-value handling and lag-induced drops"
+        return f"{sd} singletons dropped (N_listwise={nl}); try keepsingletons, then check sample filters"
+    if nl and nl != n and nl == n_paper:
+        return f"N_listwise({nl}) = paper N; your estimator dropped {nl - n} more rows (singletons / collinear / FE)"
+    if abs(n - n_paper) <= 5:
+        return f"off by {n - n_paper}: a missing value in one variable, a boundary year, or one singleton"
+    return "check sample filters (years, industries, if-conditions), missing-value handling and lag-induced drops"
 
 
 def run(estimates_path, targets_path, levels=(0.1, 0.05, 0.01)):
-    est = json.load(open(estimates_path, encoding="utf-8"))
     spec = json.load(open(targets_path, encoding="utf-8"))
+    est = load_estimates(estimates_path)
+    import os
+    base = os.path.dirname(os.path.abspath(targets_path))
+    extra = {}
     rel = float(spec.get("tolerance", {}).get("rel", 0.02))
     levels = tuple(spec.get("star_levels", levels))
     rows, summary = [], {"exact": 0, "close": 0, "differs": 0, "missing": 0}
     sign_sig = {"match": 0, "mismatch": 0}
+    se_conv = []
     for t in spec["targets"]:
-        r = find(est, t.get("match", {}))
+        pool = est
+        if t.get("estimates"):  # per-target override
+            fp = t["estimates"] if os.path.isabs(t["estimates"]) or os.path.exists(t["estimates"]) else os.path.join(base, t["estimates"])
+            if fp not in extra:
+                extra[fp] = load_estimates(fp)
+            pool = extra[fp]
+        r = find(pool, t.get("match", {}))
         lab = t.get("label") or json.dumps(t.get("match"))
         if r is None:
             rows.append({"target": lab, "item": "(estimate)", "status": "missing", "note": "no estimate matched"})
@@ -139,7 +172,10 @@ def run(estimates_path, targets_path, levels=(0.1, 0.05, 0.01)):
                     s2, _ = compare(c.get(k), v, dd, rel)
                     row[f"{k}_paper"], row[f"{k}_mine"], row[f"{k}_status"] = spec_v[k], c.get(k), s2
                     summary[s2] += 1
-            if pst is not None and pv is not None:
+            if row["status"] in ("exact", "close") and any(row.get(f"{k}_status") == "differs" for k in ("se", "t")):
+                row["note"] = "coefficient matches but se/t differ -> SE convention (cluster level, robust vs iid, small, dof)"
+                se_conv.append(f"{lab}: {var}")
+            if pst is not None and pv is not None and (c.get("p") is not None or var != "_cons"):
                 same = (math.copysign(1, c["coef"]) == math.copysign(1, pv)) and (my_st == pst)
                 row["stars_paper"], row["stars_mine"] = pst, my_st
                 sign_sig["match" if same else "mismatch"] += 1
@@ -168,6 +204,11 @@ def run(estimates_path, targets_path, levels=(0.1, 0.05, 0.01)):
         st = "; ".join(f"{k}: {f(r.get(k + '_paper'))}→{f(r.get(k + '_mine'))} ({r.get(k + '_status')})" for k in ("se", "t") if k + "_status" in r)
         lines.append(f"| {r['target']} | {r['item']} | {f(r.get('paper'))} | {f(r.get('mine'))} | {r['status']} | {st} | "
                      f"{r.get('stars_paper', '')}/{r.get('stars_mine', '') if 'stars_mine' in r else ''} |")
+    if se_conv:
+        lines += ["", "**SE convention differs** (coefficients match, se/t do not): " + "; ".join(se_conv[:20]),
+                  "Try one change at a time with `ek stata --tag`: cluster level, robust vs iid, `small`, areg vs reghdfe dof."]
     if any(r.get("hint") for r in rows):
         lines += ["", "N hints:"] + [f"- {r['target']}: {r['hint']}" for r in rows if r.get("hint")]
-    return _clean({"ok": True, "verdict": verdict, "verdict_cn": VERDICT_CN[verdict], "counts": summary, "sign_significance": sign_sig, "rows": rows}), "\n".join(lines)
+    lines += ["", "Note: the verdict is about numbers only. State separately whether the SE convention matches the "
+              "table notes and whether the conclusions hold."]
+    return _clean({"ok": True, "verdict": verdict, "verdict_cn": VERDICT_CN[verdict], "se_convention_mismatch": se_conv, "counts": summary, "sign_significance": sign_sig, "rows": rows}), "\n".join(lines)

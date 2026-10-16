@@ -14,7 +14,7 @@
  "critique_keywords": [
   {"name": "weak_iv_wend", "any": ["7.65", "Stock-Yogo", "16.38", "弱工具"], "w": 2},
   {"name": "late_or_invalid_iv", "any": ["LATE", "局部平均处理效应", "17倍", "16倍", "十几倍", "远大于"], "w": 1},
-  {"name": "exclusion", "any": ["排他性", "exclusion"], "w": 2},
+  {"name": "exclusion", "any": ["排他性", "排除性", "排除限制", "exclusion"], "w": 2},
   {"name": "iv_se_not_clustered", "any": ["未聚类", "没有聚类", "未进行聚类", "聚类到企业", "cluster(ID)", "聚类标准误"], "w": 2},
   {"name": "measurement_error", "any": ["测量误差", "度量误差"], "w": 1}
  ],

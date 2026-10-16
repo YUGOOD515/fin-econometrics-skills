@@ -214,6 +214,7 @@ class Session:
         self.warnings = []
         self.errors = []
         self.est_filter = re.compile(est_filter) if est_filter else None
+        self.vce_variants = []
         self.eststo_n = 0
         self.stop = False
         self.descriptives = []
@@ -227,7 +228,9 @@ class Session:
         self.events.append(ev)
         if kind == "warning":
             self.warnings.append(f"L{ln}: {msg} [{cmd[:80]}]")
-        if kind == "error":
+        if kind == "error" and "underidentified" in str(msg):  # a modelling fact, not an engine failure
+            self.warnings.append(f"L{ln}: estimate skipped - {msg} [{cmd[:80]}]")
+        elif kind == "error":
             self.errors.append(f"L{ln}: {msg} [{cmd[:120]}]")
 
     # ------------------------------------------------------------------ files
@@ -781,6 +784,9 @@ class Session:
             return
         if c in ("use",):
             return self.c_use(ln, rest, line)
+        if c == "log" and rest.strip().startswith("using"):
+            self.log(ln, line, "warning", "log using ignored: results are written to stata_results.md / stata_estimates.json")
+            return
         if c in ("import", "insheet"):
             body = split_command(rest)["body"] if "," in rest else rest
             body = re.sub(r"^(delimited|excel)\s+", "", body.strip())
@@ -916,13 +922,47 @@ class Session:
             if self.est_filter and not self.est_filter.search(line):
                 self.last = None
                 self.log(ln, line, "skipped", "filtered out by --est-filter"); return
-            return self.c_estimate(ln, c, rest, line, eststo_name)
+            out = self.c_estimate(ln, c, rest, line, eststo_name)
+            if self.vce_variants and self.last is not None and c not in ("sgmediation2", "sgmediation", "psmatch2"):
+                self._vce_scan(ln, c, rest, line)
+            return out
         if c in UNSUPPORTED:
             self.log(ln, line, "warning", f"command '{c}' not supported by ek stata: run it in Stata or implement manually (see references/replication.md)")
             return
         if c in OUTPUT_ONLY:
             return
         self.log(ln, line, "warning", f"unknown command '{c}' ignored")
+
+    VCE_OPT = re.compile(r"(?<![\w(])(vce\s*\([^)]*\)|cl(?:u(?:s(?:t(?:e(?:r)?)?)?)?)?\s*\([^)]*\)|robust|r|small)(?![\w(])")
+
+    def _vce_scan(self, ln, c, rest, line):
+        """Re-estimate the same line under each SE convention in --vce-scan; keep the original as e(last)."""
+        orig = self.last
+        parts = top_split(rest, ",")
+        main, optstr = parts[0], ",".join(parts[1:]) if len(parts) > 1 else ""
+        base_opts = self.VCE_OPT.sub(" ", optstr)
+        rows = []
+        for v in self.vce_variants:
+            toks = v.split()
+            small = "small" in toks; toks = [t for t in toks if t != "small"]
+            kind = toks[0].lower() if toks else "iid"
+            add = {"iid": "", "ols": "", "unadjusted": "", "robust": "vce(robust)", "r": "vce(robust)"}.get(kind)
+            if add is None:  # cluster a [b]
+                add = f"vce(cluster {' '.join(toks[1:])})" if kind.startswith("cl") else f"vce({' '.join(toks)})"
+            new_rest = f"{main}, {base_opts} {add} {'small' if small else ''}".strip()
+            n_before = len(self.estimates)
+            try:
+                self.c_estimate(ln, c, new_rest, f"{c} {new_rest}", None)
+            except Exception as ex:
+                rows.append({"variant": v, "error": str(ex)[:120]}); continue
+            if len(self.estimates) > n_before:
+                r = self.estimates[-1]; r["variant_of"] = orig["id"]; r["variant"] = v
+                key = [n for n in r.get("names", []) if n != "_cons" and not self.is_dummy(n)][:2]
+                rows.append({"variant": v, "id": r["id"], **{n: {k: r["coefs"][n].get(k) for k in ("coef", "se", "t")} for n in key},
+                             **({"kp_rk_Wald_F": r["iv"].get("kp_rk_Wald_F"), "cd_F": r["iv"].get("cragg_donald_F")} if r.get("iv") else {})})
+        orig.setdefault("vce_scan", rows)
+        self.last = orig
+        self.log(ln, line, "info", "vce scan", vce_scan=rows)
 
     @staticmethod
     def _unquote(v):
@@ -1744,6 +1784,17 @@ class Session:
         lines += ["## Estimates", ""]
         for r in self.estimates:
             lines += self.format_est(r, keep_dummies) + [""]
+            if r.get("vce_scan"):
+                lines += [f"**SE-convention scan for [{r['id']}]** (same coefficients, different inference):", "",
+                          "| variant | id | key coef (se) t | weak-ID F |", "|---|---|---|---|"]
+                for v in r["vce_scan"]:
+                    if "error" in v:
+                        lines.append(f"| {v['variant']} | - | error: {v['error']} | |"); continue
+                    cells = "; ".join(f"{n} {d['coef']:.4g} ({d['se']:.4g}) t={d['t']:.3f}" for n, d in v.items()
+                                      if isinstance(d, dict) and d.get("se") is not None and d.get("t") is not None)
+                    wf = v.get("kp_rk_Wald_F") or ""
+                    lines.append(f"| {v['variant']} | {v['id']} | {cells} | {wf if wf == '' else round(wf, 3)} |")
+                lines.append("")
         if self.descriptives:
             lines += ["## Descriptives / tests", ""]
             for d in self.descriptives:
@@ -1844,9 +1895,11 @@ def stata_pctile(s, p):
     return x[min(i, n - 1)]
 
 
-def run(do=None, cmds=None, data=None, data_dirs=None, out_dir="ek_out/stata", est_filter=None, keep_dummies=False):
+def run(do=None, cmds=None, data=None, data_dirs=None, out_dir="ek_out/stata", est_filter=None, keep_dummies=False,
+        vce_scan=None):
     t0 = time.time()
     S = Session(base_dirs=data_dirs or [], out_dir=out_dir, est_filter=est_filter)
+    S.vce_variants = [v.strip() for v in (vce_scan or "").split(";") if v.strip()]
     if data:
         S.base_dirs.append(os.path.dirname(os.path.abspath(data)))
         S.df = S.load(data)

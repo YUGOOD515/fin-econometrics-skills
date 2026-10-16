@@ -198,22 +198,35 @@ def _inv(A):
 
 
 def _drop_collinear(X, names, tol=1e-9):
-    """Greedy QR-based removal of collinear columns (Stata 'omitted because of collinearity')."""
-    if X.shape[1] == 0:
+    """Sequential removal of collinear columns, in order (Stata 'omitted because of collinearity').
+    Works on the scaled Gram matrix like Stata's _rmcoll: column j is dropped when its squared residual on
+    the kept earlier columns is < tol x its squared norm. O(K^2 N + K^3) instead of a QR loop."""
+    K = X.shape[1]
+    if K == 0:
         return X, names, []
+    nrm = np.sqrt((X * X).sum(0))
+    ok = nrm > 1e-12
+    Xs = np.where(ok, X / np.where(ok, nrm, 1), 0.0)
+    G = Xs.T @ Xs
+    L = np.zeros((K, K))
     keep, dropped = [], []
-    Q = np.zeros((X.shape[0], 0))
-    for j in range(X.shape[1]):
-        v = X[:, j].copy()
-        nv = np.linalg.norm(v)
-        if nv < 1e-12:
+    for j in range(K):
+        if not ok[j]:
             dropped.append(names[j]); continue
-        if Q.shape[1]:
-            v = v - Q @ (Q.T @ v)
-        if np.linalg.norm(v) / nv < tol ** 0.5:
+        lj = L[j, keep] if keep else np.zeros(0)
+        d = G[j, j] - lj @ lj
+        if d < tol:
             dropped.append(names[j]); continue
-        Q = np.column_stack([Q, v / np.linalg.norm(v)])
+        L[j, j] = np.sqrt(d)
+        if j + 1 < K:
+            L[j + 1:, j] = (G[j + 1:, j] - (L[j + 1:, keep] @ lj if keep else 0.0)) / L[j, j]
         keep.append(j)
+    if len(keep) < K and len(keep) <= 400:  # confirm borderline cases exactly on the kept set
+        Q, R = np.linalg.qr(Xs[:, keep])
+        dg = np.abs(np.diag(R))
+        if dg.size and dg.min() < np.sqrt(tol):
+            bad = [keep[i] for i in range(len(keep)) if dg[i] < np.sqrt(tol)]
+            dropped += [names[b] for b in bad]; keep = [k for k in keep if k not in bad]
     return X[:, keep], [names[j] for j in keep], dropped
 
 
@@ -328,7 +341,11 @@ def estimate(df, y, exog, endog=None, instruments=None, fe=None, vce="iid", clus
         Z = np.column_stack([Zx_w, Xex_w])
         L, L2, K2 = Z.shape[1], Zx_w.shape[1], len(endog)
         if L2 < K2:
-            raise ValueError(f"underidentified: {L2} excluded instruments for {K2} endogenous regressors")
+            gone = [d[len("instrument "):] for d in dropped if str(d).startswith("instrument ")]
+            raise ValueError(f"underidentified: {L2} excluded instrument(s) left for {K2} endogenous regressor(s)"
+                             + (f"; dropped as collinear with controls/absorbed FE: {', '.join(gone)}" if gone else "")
+                             + ". A time-invariant instrument is absorbed by unit fixed effects: identification must come "
+                               "from cross-sectional variation (no unit FE) or from interacting it with a time-varying series")
         ZZi = _inv(Z.T @ Z)
         PzX = Z @ (ZZi @ (Z.T @ X))
         if estimator == "liml":
@@ -538,6 +555,53 @@ def kp_rk(X, Z, vce, cl, N, wald=True):
     return rk, (L - K + 1)
 
 
+def _ar_set(yp, xp, Zp, vce, cl, N, L, L2, G, b_hat, level=0.95):
+    """AR confidence set for one endogenous regressor: {b0 : AR_F(b0) < F crit}. Returns a list of [lo, hi]
+    intervals (None = unbounded) plus the grid used, so a disjoint or unbounded set is visible."""
+    crit = stats.f.ppf(level, L2, max(N - L, 1))
+    ZtZi = np.linalg.pinv(Zp.T @ Zp)
+    scale = (N - L) / N if vce != "cluster" else (N - L) / (N - 1)
+    cadj = (G / (G - 1)) if vce == "cluster" else 1
+
+    def arF(b0):
+        u = yp - b0 * xp
+        g = ZtZi @ (Zp.T @ u); r = u - Zp @ g
+        return _wald(g, _ols_vcov(Zp, r, vce, cl, N) * cadj) / L2 * scale
+    # grid: centred on the IV estimate, width from the reduced-form / first-stage scale
+    pi = ZtZi @ (Zp.T @ xp); gam = ZtZi @ (Zp.T @ yp)
+    span = max(abs(b_hat), 1e-6) * 50 + 10 * float(np.linalg.norm(gam) / max(np.linalg.norm(pi), 1e-12))
+    grid = np.unique(np.r_[np.linspace(b_hat - span, b_hat + span, 1601), b_hat])
+    acc = np.array([arF(b) < crit for b in grid])
+    if not acc.any():
+        return {"intervals": [], "note": "empty at grid resolution (model rejects every value: misspecification?)"}
+    iv, i = [], 0
+    while i < len(grid):
+        if acc[i]:
+            j = i
+            while j + 1 < len(grid) and acc[j + 1]:
+                j += 1
+            lo = None if i == 0 else float(_bisect(arF, grid[i - 1], grid[i], crit))
+            hi = None if j == len(grid) - 1 else float(_bisect(arF, grid[j], grid[j + 1], crit))
+            iv.append([lo, hi]); i = j + 1
+        else:
+            i += 1
+    out = {"intervals": iv, "level": level}
+    if any(a is None or b is None for a, b in iv):
+        out["note"] = "unbounded within the search grid -> instruments too weak for informative inference"
+    return out
+
+
+def _bisect(f, a, b, crit, it=40):
+    fa = f(a) - crit
+    for _ in range(it):
+        m = (a + b) / 2; fm = f(m) - crit
+        if (fm < 0) == (fa < 0):
+            a, fa = m, fm
+        else:
+            b = m
+    return (a + b) / 2
+
+
 def iv_diagnostics(y, Xen, Zx, W, e, b_en, vce, cl, N, small, df_a, endog, instruments, kappa=1.0):
     """First-stage and weak/under-identification diagnostics (ivreg2 conventions, large-sample)."""
     K2, L2 = Xen.shape[1], Zx.shape[1]
@@ -607,6 +671,11 @@ def iv_diagnostics(y, Xen, Zx, W, e, b_en, vce, cl, N, small, df_a, endog, instr
     out["AR_F"] = arW / L2 * ((N - L) / N if vce != "cluster" else (N - L) / (N - 1))
     out["AR_p"] = float(stats.chi2.sf(arW, L2))
     out["AR_F_p"] = float(stats.f.sf(out["AR_F"], L2, max(N - L, 1)))
+    if K2 == 1:  # weak-IV-robust 95% confidence set by inverting the AR test over a grid
+        try:
+            out["AR_CI95"] = _ar_set(yp, Xp[:, 0], Zp, vce, cl, N, L, L2, G, float(b_en[0]))
+        except Exception as ex:
+            out["AR_CI95_error"] = str(ex)[:120]
     # overidentification
     if L2 > K2:
         Zfull = Zp

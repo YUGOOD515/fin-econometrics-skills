@@ -101,8 +101,15 @@ dropping, KP/CD/AR weak-IV statistics), writing `ek_out/stata/stata_results.md` 
 specification is written in Stata; it is also the quickest way to run FE panels with absorbed
 effects and post-estimation `test`/`lincom`. Unsupported commands produce a warning, never a
 silent skip. `--cmd`-only runs go to `ek_out/stata/cmd/`; `--tag NAME` keeps variants apart.
-`ek check` reports which estimates file it used, adds N-mismatch hints (e.g. `keepsingletons`) and
-a Chinese verdict (`verdict_cn`).
+`ek check` reports which estimates file it used, adds N-mismatch hints (e.g. `keepsingletons`),
+flags "coefficients match but se/t differ" (SE convention) and gives a Chinese verdict (`verdict_cn`).
+Replication helpers: `--vce-scan "iid; robust; cluster id; cluster city"` re-runs each estimation
+under every SE convention (find the paper's, then test the claim under the right one);
+`$EK ivcheck --data d.dta --z Z --x X --y Y --entity id --time year --levels city province` checks
+how an instrument is built (time-invariant? varies only at city×year? rank-1 shift-share? variation
+left after FE?); IV output includes Stock-Yogo flags and an Anderson-Rubin 95% confidence set
+(`AR_CI95`). For paper replication always estimate with `ek stata` (its SE conventions follow
+Stata; `ek fit`'s cluster dof differs slightly).
 
 ## Hard rules
 - Interpret magnitudes in units: log-log means elasticity; in log-level, 100·b is a
@@ -146,5 +153,7 @@ multicollinearity, influential_obs, endogeneity, weak_instruments, panel_effects
 {nonrobust,robust,hc3,hac,cluster} --lags --cluster --label --query --freq`.
 Lag and difference operators (these need `--time`): `L.x`, `L2.x`, `D.x`, `F.x`.
 Models: `ols wls fgls prais corc 2sls liml gmm fe twfe re pooled logit probit`.
-`final_model.fit_file` may also point to an `ek stata` estimate: `ek_out/stata/stata_estimates.json#m1`
-(stored name or id); `diagnose` saves its baseline as `ek_out/fits/<label>.json`.
+`final_model.fit_file`, story `table.fits` and `ek compare --fits` also accept an `ek stata` estimate:
+`ek_out/stata/stata_estimates.json#m1` (stored name from `est store`/`eststo`, or id).
+`diagnose` saves its (pooled OLS) baseline as `ek_out/fits/<label>.json`; with `--entity --time` it
+adds the Wooldridge panel serial-correlation test. `ek check --list` indexes an estimates file.
