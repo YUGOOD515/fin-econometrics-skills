@@ -100,7 +100,9 @@ dropping, KP/CD/AR weak-IV statistics), writing `ek_out/stata/stata_results.md` 
 `stata_estimates.json`. Prefer it whenever the user thinks in Stata terms or a paper's
 specification is written in Stata; it is also the quickest way to run FE panels with absorbed
 effects and post-estimation `test`/`lincom`. Unsupported commands produce a warning, never a
-silent skip.
+silent skip. `--cmd`-only runs go to `ek_out/stata/cmd/`; `--tag NAME` keeps variants apart.
+`ek check` reports which estimates file it used, adds N-mismatch hints (e.g. `keepsingletons`) and
+a Chinese verdict (`verdict_cn`).
 
 ## Hard rules
 - Interpret magnitudes in units: log-log means elasticity; in log-level, 100·b is a

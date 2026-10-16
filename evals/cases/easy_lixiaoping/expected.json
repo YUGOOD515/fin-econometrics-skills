@@ -12,14 +12,15 @@
  ],
  "verdict_ok": ["replicated", "largely replicated", "完全复现", "基本复现"],
  "critique_keywords": [
-  {"name": "weak_iv_col1", "any": ["Stock-Yogo", "19.93", "弱工具", "弱识别"], "w": 2},
+  {"name": "weak_iv_col1", "any": ["Stock-Yogo", "16.38", "19.93", "弱工具", "弱识别"], "w": 2},
+  {"name": "collinear_lagged_iv", "any": ["共线", "collinear", "完全相同", "恰好识别", "只有一个工具", "实际只有"], "w": 2},
   {"name": "iv_magnitude_red_flag", "any": ["100倍", "180倍", "量级", "远大于", "数量级", "-3.10", "−3.10", "-3.1026"], "w": 1},
   {"name": "time_invariant_iv", "any": ["时不变", "不随时间", "1970", "截面工具", "滞后项"], "w": 1},
   {"name": "exclusion", "any": ["排他性", "exclusion"], "w": 2},
   {"name": "unsupported_gmm_noted", "any": ["xtabond", "GMM", "xtdpdsys"], "w": 1}
  ],
  "rubric": ["Ran the authors' do-file through ek stata; matched Table 1 (6 cols) and 附表3 (4 cols) to 4 decimals incl. t and Anderson LM / CD F",
-            "Flags that col (1) IV is weak given 2 instruments (CD 10.31 < Stock-Yogo 19.93) and the -3.10 coefficient is ~180x OLS",
+            "Notices that l3./l4.lnbk70 (and lnedu70, l.lnedu70) are identical within country, so one instrument is dropped as collinear: cols (1)-(2) are just-identified; col (1) is weak (CD 10.31 < Stock-Yogo 16.38) and the -3.10 coefficient is ~180x OLS",
             "Notes 1970 instruments are time-invariant (lags only trim the sample; FE absent in cols 1-2) and exclusion restriction is doubtful (historical books/education affect inequality directly)",
             "Notes Bartik/leave-one-out IVs' exclusion threats (global common shocks); reports unsupported GMM honestly",
             "Overall verdict: numbers replicated; direction of conclusion consistent; causal claim only suggestive"]}

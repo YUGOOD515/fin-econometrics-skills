@@ -9,6 +9,10 @@ targets.json:
 Stats keys: N r2 adj_r2 r2_within pseudo_r2 kp_rk_LM (= Anderson LM under iid) anderson_LM kp_rk_Wald_F cd_F
 AR_F hansen_J hansen_p sargan first_stage_F SW_F (first endogenous regressor); any other key = top-level field.
 Strings keep the paper's rounding: '0.0392***' -> value 0.0392, 4 decimals, stars '***'.
+Per-coefficient fields: coef, se, t (z for large-sample estimators). r2 is the overall R2 Stata prints for
+reg/areg/reghdfe (reghdfe "R-squared"); use r2_within for xtreg fe "within" / reghdfe "Within R-sq.".
+Optional top-level "estimates": "ek_out/stata/<tag>/stata_estimates.json" selects which run to check.
+Verdict: replicated=完全复现 / largely replicated=基本复现 (>=80% exact|close) / partially=部分复现 / not=未能复现.
 """
 import json, re, math
 from .common import _clean
@@ -84,6 +88,22 @@ def _get(r, path):
     return cur
 
 
+VERDICT_CN = {"replicated": "完全复现", "largely replicated": "基本复现", "partially replicated": "部分复现",
+              "not replicated": "未能复现"}
+
+
+def n_hint(r, n_paper):
+    """Most likely reason for an N mismatch, from the estimate's bookkeeping."""
+    n, sd = int(r.get("N") or 0), int(r.get("singletons_dropped") or 0)
+    if sd and n + sd == n_paper:
+        return f"N + singletons_dropped ({sd}) = paper N: the paper kept singletons -> add keepsingletons (or use areg/xtreg)"
+    if sd and n < n_paper:
+        return f"{sd} singletons dropped; try keepsingletons, then check sample filters"
+    if r.get("N_listwise") and int(r["N_listwise"]) != n:
+        return f"listwise N={r['N_listwise']}; check missing values / sample filters (years, winsorization, if conditions)"
+    return "check sample filters, missing-value handling and lag-induced drops"
+
+
 def run(estimates_path, targets_path, levels=(0.1, 0.05, 0.01)):
     est = json.load(open(estimates_path, encoding="utf-8"))
     spec = json.load(open(targets_path, encoding="utf-8"))
@@ -126,7 +146,10 @@ def run(estimates_path, targets_path, levels=(0.1, 0.05, 0.01)):
             rows.append(row)
         for k, v in ({"N": t["N"]} if "N" in t else {}).items():
             st, _ = compare(float(r.get("N") or 0), float(v), 0, 0)
-            rows.append({"target": lab, "item": "N", "paper": v, "mine": r.get("N"), "status": st}); summary[st] += 1
+            row = {"target": lab, "item": "N", "paper": v, "mine": r.get("N"), "status": st}
+            if st != "exact":
+                row["hint"] = n_hint(r, int(float(v)))
+            rows.append(row); summary[st] += 1
         for k, v in (t.get("stats") or {}).items():
             path = STAT_KEYS.get(k, (k,))
             mine = _get(r, path)
@@ -145,4 +168,6 @@ def run(estimates_path, targets_path, levels=(0.1, 0.05, 0.01)):
         st = "; ".join(f"{k}: {f(r.get(k + '_paper'))}→{f(r.get(k + '_mine'))} ({r.get(k + '_status')})" for k in ("se", "t") if k + "_status" in r)
         lines.append(f"| {r['target']} | {r['item']} | {f(r.get('paper'))} | {f(r.get('mine'))} | {r['status']} | {st} | "
                      f"{r.get('stars_paper', '')}/{r.get('stars_mine', '') if 'stars_mine' in r else ''} |")
-    return _clean({"ok": True, "verdict": verdict, "counts": summary, "sign_significance": sign_sig, "rows": rows}), "\n".join(lines)
+    if any(r.get("hint") for r in rows):
+        lines += ["", "N hints:"] + [f"- {r['target']}: {r['hint']}" for r in rows if r.get("hint")]
+    return _clean({"ok": True, "verdict": verdict, "verdict_cn": VERDICT_CN[verdict], "counts": summary, "sign_significance": sign_sig, "rows": rows}), "\n".join(lines)

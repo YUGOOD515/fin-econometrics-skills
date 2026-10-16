@@ -22,9 +22,8 @@ OUTPUT_ONLY = {"esttab", "estout", "estadd", "outreg2", "outreg", "logout", "dis
                "kdensity", "label", "lab", "format", "order", "compress", "notes", "note", "version", "clear",
                "cls", "more", "pause", "describe", "des", "codebook", "list", "l", "browse", "br", "edit",
                "putdocx", "putexcel", "matrix", "mat", "mata", "timer", "erase", "shell", "translate", "which",
-               "help", "ssc", "net", "ado", "adopath", "sysdir", "macro", "return", "ereturn", "tempvar",
-               "tempname", "tempfile", "marksample", "esttab,", "graph2tex", "xtline", "xtdes", "xtdescribe",
-               "xtsum", "inspect", "sum2docx", "corr2docx", "reg2docx", "t2docx", "tabout", "outsheet", "export", "lookfor", "ds", "misstable", "mvencode", "cap", "noi", "estimates", "est",
+               "help", "ssc", "net", "ado", "adopath", "sysdir", "macro", "return", "ereturn", "marksample", "esttab,", "graph2tex", "xtline", "xtdes", "xtdescribe",
+               "inspect", "sum2docx", "corr2docx", "reg2docx", "t2docx", "tabout", "outsheet", "export", "lookfor", "ds", "misstable", "mvencode", "cap", "noi", "estimates", "est",
                "eststo", "estpost", "asdoc", "local", "global", "scalar", "drop", "keep"}
 EXTRA_EST = {"newey", "qreg", "tobit", "ologit", "oprobit", "mlogit", "clogit", "xtlogit", "psmatch2"}
 UNSUPPORTED = {"xtabond", "xtdpdsys", "xtdpd", "xtabond2", "sensemakr", "bdiff", "teffects",
@@ -207,6 +206,7 @@ class Session:
         self.panel = None  # (id, time)
         self.preserved = []
         self.saved = {}
+        self.saved_panels = {}
         self.last = None
         self.stored = {}
         self.estimates = []
@@ -781,10 +781,18 @@ class Session:
             return
         if c in ("use",):
             return self.c_use(ln, rest, line)
-        if c in ("import",):
-            m = re.match(r"^(delimited|excel)\s+(?:using\s+)?(\S+)", rest)
-            if m:
-                self.df = self.load(m.group(2)); self.log(ln, line, "data", f"loaded N={len(self.df)}")
+        if c in ("import", "insheet"):
+            body = split_command(rest)["body"] if "," in rest else rest
+            body = re.sub(r"^(delimited|excel)\s+", "", body.strip())
+            body = re.sub(r"^using\s+", "", body.strip()).strip().strip('"')
+            if not body:
+                raise StataError("import: could not read the file name")
+            self.df = self.load(body); self.panel = None
+            self.log(ln, line, "data", f"loaded {body}: N={len(self.df)}")
+            return
+        if c in ("tempfile", "tempvar", "tempname"):
+            for nm in rest.split():
+                self.locals[nm] = f"__{c[4:]}_{nm}"
             return
         if c in ("sysuse", "webuse"):
             raise StataError("sysuse/webuse need internet/Stata; skipped")
@@ -821,9 +829,11 @@ class Session:
             return
         if c in ("save", "sa", "sav"):
             m = re.match(r'^\s*"?([^",]+)"?', rest)
+            if not m or not m.group(1).strip():
+                raise StataError("save: no file name (an undefined macro? declare it with `tempfile name` first)")
             nm = os.path.basename(m.group(1).strip())
             nm = nm if nm.endswith(".dta") else nm + ".dta"
-            self.saved[nm] = self.df.copy()
+            self.saved[nm] = self.df.copy(); self.saved_panels[nm] = self.panel
             os.makedirs(os.path.join(self.out_dir, "saved"), exist_ok=True)
             pth = os.path.join(self.out_dir, "saved", nm[:-4] + ".csv")
             self.df[[c_ for c_ in self.df.columns if not c_.startswith("__")]].to_csv(pth, index=False)
@@ -876,7 +886,9 @@ class Session:
         if c in ("ttest",):
             return self.c_ttest(ln, rest, line)
         if c in ("pwcorr", "corr", "correlate", "cor"):
-            return self.c_corr(ln, rest, line)
+            return self.c_corr(ln, rest, line, pairwise=(c == "pwcorr"))
+        if c in ("xtsum",):
+            return self.c_xtsum(ln, rest, line)
         if c in ("count",):
             p = split_command(rest); n = int(self.mask(p["cond"], p["inrange"]).sum())
             self.scalars["r(N)"] = n; self.log(ln, line, "display", f"count = {n}"); return
@@ -932,12 +944,16 @@ class Session:
             fname, cols = body, None
         fname = fname.strip().strip('"')
         df = self.load(fname)
+        try:
+            kind, key = self.find_file(fname)
+        except Exception:
+            kind, key = None, None
         if cols:
             df = df[[c for c in df.columns if any(fnmatch.fnmatchcase(c, t) for t in cols)]]
         self.df = df
         if p["cond"]:
             self.df = self.df[self.mask(p["cond"])].reset_index(drop=True)
-        self.panel = None
+        self.panel = self.saved_panels.get(key) if kind == "mem" else None  # xtset is stored with saved data
         self.log(ln, line, "data", f"loaded {fname}: N={len(df)}, vars={df.shape[1]}")
 
     def by_groups(self, by):
@@ -1183,11 +1199,40 @@ class Session:
             res = {"var": m.group(1), "mu0": mu, "n": int(x.count()), "mean": x.mean(), "t": t, "p_two_sided": pv}
         self.descriptives.append({"line": ln, "cmd": line, "ttest": _clean(res)})
 
-    def c_corr(self, ln, rest, line):
+    def c_corr(self, ln, rest, line, pairwise=False):
         p = split_command(rest)
-        vs = self.expand_varlist(p["body"].split())
-        d = self.df.loc[self.mask(p["cond"], p["inrange"]), vs].astype(float)
-        self.descriptives.append({"line": ln, "cmd": line, "corr": d.corr().round(4).to_dict()})
+        vs = self.expand_varlist(p["body"].split()) if p["body"] else self.varnames()
+        d = self.df.loc[self.mask(p["cond"], p["inrange"]), vs].apply(pd.to_numeric, errors="coerce")
+        if not pairwise:
+            d = d.dropna()
+        r = d.corr()
+        out = {"line": ln, "cmd": line, "corr": r.round(4).to_dict(), "N": int(len(d)) if not pairwise else None}
+        if pairwise:  # pwcorr: pairwise N and two-sided p-values (t-test of r)
+            n = d.notna().astype(int).T @ d.notna().astype(int)
+            tt = r * np.sqrt((n - 2) / (1 - r.clip(-0.999999999, 0.999999999) ** 2))
+            pv = pd.DataFrame(2 * stats.t.sf(np.abs(tt), n - 2), index=r.index, columns=r.columns)
+            out.update({"pairwise_N": n.to_dict(), "p": pv.round(4).to_dict()})
+        self.descriptives.append(out)
+
+    def c_xtsum(self, ln, rest, line):
+        """Stata xtsum: overall / between / within mean, sd, min, max and N, n, T-bar."""
+        if not self.panel or not self.panel[0]:
+            raise StataError("xtsum needs xtset panelvar")
+        p = split_command(rest); pid = self.panel[0]
+        vs = self.expand_varlist(p["body"].split()) if p["body"] else [v for v in self.varnames() if v not in self.panel]
+        msk = self.mask(p["cond"], p["inrange"]); rows = []
+        for v in vs:
+            x = pd.to_numeric(self.df.loc[msk, v], errors="coerce"); g = self.df.loc[msk, pid]
+            ok = x.notna(); x, g = x[ok], g[ok]
+            if not len(x):
+                continue
+            gm = x.groupby(g).transform("mean"); bm = x.groupby(g).mean()
+            w = x - gm + x.mean()
+            rows.append({"var": v, "mean": x.mean(), "overall_sd": x.std(), "overall_min": x.min(), "overall_max": x.max(),
+                         "between_sd": bm.std(), "between_min": bm.min(), "between_max": bm.max(),
+                         "within_sd": w.std(), "within_min": w.min(), "within_max": w.max(),
+                         "N": int(len(x)), "n": int(bm.size), "T_bar": len(x) / bm.size})
+        self.descriptives.append({"line": ln, "cmd": line, "xtsum": _clean(rows)})
 
     def c_est(self, ln, c, rest, line):
         toks = rest.split()
@@ -1809,6 +1854,14 @@ def run(do=None, cmds=None, data=None, data_dirs=None, out_dir="ek_out/stata", e
         S.run_file(do)
     for c in cmds or []:
         S.run_text(c)
+    iv_w = []
+    for r in S.estimates:
+        dropped = [x[len("instrument "):] for x in (r.get("omitted_collinear") or []) if str(x).startswith("instrument ")]
+        if dropped:
+            iv_w.append(f"L{r['line']}: excluded instrument(s) {', '.join(dropped)} dropped as collinear - identified by "
+                        f"{(r.get('iv') or {}).get('n_excluded_instruments')} instrument(s), not as written (lags of a "
+                        "time-invariant variable are identical within a unit); use the Stock-Yogo value for that count")
+    S.warnings[:0] = iv_w
     os.makedirs(out_dir, exist_ok=True)
     md = S.summarize(keep_dummies)
     mdp = os.path.join(out_dir, "stata_results.md")
@@ -1821,6 +1874,10 @@ def run(do=None, cmds=None, data=None, data_dirs=None, out_dir="ek_out/stata", e
         est_out.append(rr)
     jp = os.path.join(out_dir, "stata_estimates.json")
     open(jp, "w", encoding="utf-8").write(json.dumps(_clean(est_out), ensure_ascii=False))
+    json.dump({"do": os.path.abspath(do) if do else None, "cmds": cmds, "data": data, "est_filter": est_filter,
+               "n_estimates": len(S.estimates), "n_errors": len(S.errors),
+               "time": time.strftime("%Y-%m-%d %H:%M:%S")},
+              open(os.path.join(out_dir, "run_info.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     brief = []
     for r in S.estimates:
         nm = [n for n in r.get("names", []) if n != "_cons" and not Session.is_dummy(n)]

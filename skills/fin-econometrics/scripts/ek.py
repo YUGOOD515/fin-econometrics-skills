@@ -85,10 +85,13 @@ def main():
     p.add_argument("--est-filter", help="regex: only run estimation lines matching it (data steps always run)")
     p.add_argument("--keep-dummies", action="store_true", help="show factor-dummy coefficients in results")
     p.add_argument("--quiet", action="store_true", help="omit per-estimate brief lines from stdout")
-    p.add_argument("--out-dir", default="ek_out/stata")
+    p.add_argument("--out-dir", default=None,
+                   help="default ek_out/stata for --do runs, ek_out/stata/cmd for --cmd-only runs (never overwrites the do-file run)")
+    p.add_argument("--tag", help="write to ek_out/stata/<tag>/ (keep several runs side by side)")
 
     p = sub.add_parser("check", help="compare estimates with the paper's reported numbers")
-    p.add_argument("--estimates", default="ek_out/stata/stata_estimates.json")
+    p.add_argument("--estimates", default=None,
+                   help="stata_estimates.json; default: targets.json 'estimates' key, else ek_out/stata/stata_estimates.json")
     p.add_argument("--targets", required=True, help="targets.json (see econkit/check.py docstring)")
     p.add_argument("--out", default=None, help="markdown report path (default next to estimates)")
 
@@ -151,6 +154,8 @@ def main():
         from econkit import stata
         if not (a.do or a.stata_cmd):
             fail("give --do file.do and/or --cmd '...'")
+        if not a.out_dir:
+            a.out_dir = os.path.join("ek_out", "stata", a.tag) if a.tag else ("ek_out/stata" if a.do else "ek_out/stata/cmd")
         res, _ = stata.run(do=a.do, cmds=a.stata_cmd, data=a.data, data_dirs=a.data_dir, out_dir=a.out_dir,
                            est_filter=a.est_filter, keep_dummies=a.keep_dummies)
         if a.quiet:
@@ -158,7 +163,22 @@ def main():
         emit(res)
     elif a.cmd == "check":
         from econkit import check
+        if not a.estimates:
+            tj = json.load(open(a.targets, encoding="utf-8"))
+            e = tj.get("estimates") if isinstance(tj, dict) else None
+            if e and not os.path.isabs(e) and not os.path.exists(e):
+                e = os.path.join(os.path.dirname(os.path.abspath(a.targets)), e)
+            a.estimates = e or "ek_out/stata/stata_estimates.json"
+        if not os.path.exists(a.estimates):
+            import glob as _g
+            cands = sorted(_g.glob("ek_out/stata/**/stata_estimates.json", recursive=True), key=os.path.getmtime)
+            fail(f"estimates file not found: {a.estimates}", candidates=cands)
         res, md = check.run(a.estimates, a.targets)
+        res["estimates_file"] = os.path.abspath(a.estimates)
+        ri = os.path.join(os.path.dirname(os.path.abspath(a.estimates)), "run_info.json")
+        if os.path.exists(ri):
+            res["estimates_run"] = json.load(open(ri, encoding="utf-8"))
+        md = md.replace("# Replication check\n", f"# Replication check\n\nestimates: `{a.estimates}`\n", 1)
         out = a.out or os.path.join(os.path.dirname(os.path.abspath(a.estimates)), "check_report.md")
         open(out, "w", encoding="utf-8").write(md)
         jp = os.path.splitext(out)[0] + ".json"

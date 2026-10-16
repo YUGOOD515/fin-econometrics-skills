@@ -18,6 +18,11 @@ except Exception:  # pragma: no cover
 
 
 # ----------------------------------------------------------------------------- utilities
+# Stock-Yogo (2005) critical values, 10% maximal IV size, keyed by (n_endog, n_excluded_instruments)
+SY10 = {(1, 1): 16.38, (1, 2): 19.93, (1, 3): 22.30, (1, 4): 24.58, (1, 5): 26.87, (1, 6): 29.18, (1, 7): 31.50,
+        (1, 8): 33.84, (1, 9): 36.19, (1, 10): 38.54, (2, 2): 7.03, (2, 3): 13.43, (2, 4): 16.87, (2, 5): 19.45,
+        (2, 6): 21.68, (2, 7): 23.72, (2, 8): 25.64, (2, 9): 27.51, (2, 10): 29.32}
+
 def group_codes(df, cols):
     """Integer codes for the interaction of one or more columns (a#b). Missing -> -1."""
     if isinstance(cols, str):
@@ -601,6 +606,7 @@ def iv_diagnostics(y, Xen, Zx, W, e, b_en, vce, cl, N, small, df_a, endog, instr
     out["AR_chi2"] = arW
     out["AR_F"] = arW / L2 * ((N - L) / N if vce != "cluster" else (N - L) / (N - 1))
     out["AR_p"] = float(stats.chi2.sf(arW, L2))
+    out["AR_F_p"] = float(stats.f.sf(out["AR_F"], L2, max(N - L, 1)))
     # overidentification
     if L2 > K2:
         Zfull = Zp
@@ -638,6 +644,10 @@ def iv_diagnostics(y, Xen, Zx, W, e, b_en, vce, cl, N, small, df_a, endog, instr
     minF = min([f["SW_F"] for f in fs]) if fs else None
     eff = out.get("kp_rk_Wald_F") if vce != "iid" else cd
     out["weak_iv_flag"] = bool(eff is not None and eff < 10)
+    sy = SY10.get((K2, L2))
+    if sy is not None and eff is not None:
+        out["stock_yogo_10pct_size"] = sy
+        out["below_stock_yogo_10pct"] = bool(eff < sy)
     out["note"] = ("weak-ID statistic: KP rk Wald F (non-iid) / Cragg-Donald (iid); compare to Stock-Yogo 10% "
                    "critical values (~16.38 for 1 endog/1 IV) or rule-of-thumb 10; per-endog use SW_F")
     return out
