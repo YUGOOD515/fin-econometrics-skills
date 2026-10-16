@@ -1,0 +1,25 @@
+{"case": "hard_overtime", "difficulty": "hard", "type": "replication", "has_dofile": false,
+ "materials": ["论文.pdf", "regression_sample.dta"],
+ "source": "宣扬 武凯文(2023)《世界经济》第10期; 作者数据 regression_sample.dta",
+ "targets": [
+  {"label": "表4(1)", "var": "OT_year", "coef": -0.015, "dec": 3, "t": -2.10, "N": 9859, "w": 3},
+  {"label": "表4(2)", "var": "OT_norm", "coef": -0.013, "dec": 3, "t": -1.84, "N": 9859, "w": 1},
+  {"label": "表4(3)", "var": "OT_wend", "coef": -0.011, "dec": 3, "t": -2.07, "N": 9859, "w": 1},
+  {"label": "表5(1)", "var": "Sanction", "coef": -0.001, "dec": 3, "t": -5.03, "N": 9859, "w": 1},
+  {"label": "表5(2)", "var": "OT_year", "coef": -0.251, "dec": 3, "t": -2.18, "N": 9859, "w": 3},
+  {"label": "表5(4)", "var": "OT_norm", "coef": -0.229, "dec": 3, "t": -2.19, "N": 9859, "w": 1},
+  {"label": "表5(6)", "var": "OT_wend", "coef": -0.338, "dec": 3, "t": -1.83, "N": 9859, "w": 1}
+ ],
+ "verdict_ok": ["replicated", "largely replicated", "完全复现", "基本复现"],
+ "critique_keywords": [
+  {"name": "weak_iv_wend", "any": ["7.65", "Stock-Yogo", "16.38", "弱工具"], "w": 2},
+  {"name": "late_or_invalid_iv", "any": ["LATE", "局部平均处理效应", "17倍", "16倍", "十几倍", "远大于"], "w": 1},
+  {"name": "exclusion", "any": ["排他性", "exclusion"], "w": 2},
+  {"name": "iv_se_not_clustered", "any": ["未聚类", "没有聚类", "未进行聚类", "聚类到企业", "cluster(ID)", "聚类标准误"], "w": 2},
+  {"name": "measurement_error", "any": ["测量误差", "度量误差"], "w": 1}
+ ],
+ "rubric": ["Table 4: areg/reghdfe LS on OT measure + 12 controls + year dummies, firm FE, cluster(ID); t-stats match (-2.10, -1.84, -2.07) only with firm clustering",
+            "Table 5: xtivreg fe with Sanction, iid SE; first stage -0.001 (t -5.03) and IV -0.251 (t -2.18); CD F 25.26/27.92/7.65",
+            "Flags OT_wend weak instrument (7.65 < 16.38) and that the IV SEs are not clustered although OLS are; re-estimates IV with clustered SE and reports AR inference",
+            "Discusses exclusion: provincial labour-law enforcement can affect labour share directly (wages, compliance costs); the revenue placebo is insufficient",
+            "IV ≈ 17x OLS: LATE explanation vs measurement error in night-light OT proxy vs invalid IV; verdict hedged"]}

@@ -197,9 +197,18 @@ def run(a, df):
             "try logs, squares or interactions guided by theory; re-run diagnose", "transform --gen ...", "decision-rules.md#specification")
     if T.get("vif") and max(T["vif"].values()) > 10:
         worst = max(T["vif"], key=T["vif"].get)
-        add("multicollinearity", "low", f"max VIF={T['vif'][worst]:.1f} ({worst})",
-            "coefficients imprecise but unbiased; do not drop theory-relevant controls mechanically; report joint tests",
-            "", "decision-rules.md#multicollinearity")
+        hi = [c for c, v in T["vif"].items() if v > 10]
+        # VIF of x and x^2 / x*z terms is high by construction (harmless): flag only if a high-VIF
+        # variable is not a transform of another regressor
+        def _related(c):
+            return any(o != c and len(o) >= 1 and (o in c or c in o) and abs(np.corrcoef(d[o].astype(float), d[c].astype(float))[0, 1]) > .8
+                       for o in a.x if o in d and c in d)
+        if hi and all(_related(c) for c in hi):
+            T["vif_note"] = f"high VIF only among {hi}: polynomial/interaction terms built from the same variable; collinearity by construction, not a problem (test them jointly)"
+        else:
+            add("multicollinearity", "low", f"max VIF={T['vif'][worst]:.1f} ({worst})",
+                "coefficients imprecise but unbiased; do not drop theory-relevant controls mechanically; report joint tests",
+                "", "decision-rules.md#multicollinearity")
     if T["influence"]["n_influential"] > max(3, 0.05 * n):
         add("influential_obs", "low", f"{T['influence']['n_influential']} obs with Cook's D > 4/n",
             "inspect top rows; re-estimate without them as robustness (never silently delete)", "", "decision-rules.md#outliers")

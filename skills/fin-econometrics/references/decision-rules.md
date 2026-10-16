@@ -56,6 +56,10 @@ Textbook pointers: Chen Q. (2023) *Econometrics and Stata Applications*, 2nd ed.
 - **Estimators**: 2SLS (main), LIML (robust to weak instruments; should be close to 2SLS when instruments are strong), GMM (efficient under heteroskedasticity with over-id).
 - **Endogeneity test**: Durbin / Wu-Hausman, or the robust Wooldridge regression test (`wooldridge_regression_endog`). Rejection → prefer IV. Non-rejection → OLS is acceptable and more efficient, but report both.
 - **Proxy variables**: a proxy for an omitted factor (e.g. IQ for ability) reduces omitted-variable bias. If the proxy is measured with error, instrument it with other indicators (e.g. another test score or family background).
+- **Weak-ID statistic to quote**: with robust/cluster SE use the Kleibergen-Paap rk Wald F (`kp_rk_Wald_F`); with iid SE the Cragg-Donald F; with several endogenous regressors check every Sanderson-Windmeijer F (`SW_F`), not just the joint first-stage F. Compare with Stock-Yogo (10% maximal IV size: 16.38 for 1 endog/1 IV, 19.93 for 1/2) — the "F > 10" rule is a floor. Under weak IV report the Anderson-Rubin test (`AR_F`, `AR_p`), which is robust to weak instruments.
+- **Red flags that need a sentence each**: (a) IV ≫ OLS (e.g. 2–3×): measurement error in x, LATE for compliers, or a violated exclusion restriction — say which you believe; (b) family-background, geography or "industry/region average" instruments: they may affect y directly (exclusion threat — name the channel); (c) instruments measured after the treatment (post-treatment) or lagged x when x is persistent and errors are serially correlated: not excludable; (d) an over-id test that "passes" with instruments sharing the same threat is not reassuring.
+- **Proxy + IV**: when a proxy (IQ for ability) is itself an imperfect measure, include it and instrument it with a second indicator (e.g. KWW score) — treat the proxy as endogenous, not the variable of interest only.
+- **Headline must match the model**: if the final model is IV, the headline number is the IV estimate (with its CI); OLS appears only as the comparison.
 - **Interpret**: IV estimates a LATE when effects are heterogeneous. IV SEs are larger; a smaller t-stat is expected.
 - **Command**: `fit --model 2sls --x <all regressors incl. endogenous> --endog E --instruments Z1 Z2 --cov robust`.
 - Ref: CQ ch.10; W ch.15.
@@ -69,6 +73,21 @@ Textbook pointers: Chen Q. (2023) *Econometrics and Stata Applications*, 2nd ed.
 ## binary
 - y ∈ {0,1} → logit/probit. Report **average marginal effects** (`marginal_effects`), not raw coefficients, and the % correctly predicted. A linear probability model with robust SE can serve as a robustness check.
 - Ref: CQ ch.11.
+
+## causal_claim
+- `credible`: a design whose identifying assumption you can state and defend (randomization, IV with strong + plausibly excludable instruments, DID with parallel pre-trends shown, RDD), plus robustness. Even then, state the population (LATE, treated firms).
+- `suggestive`: FE/controls remove obvious confounders, or an IV/DID whose key assumption is arguable; results robust across specifications.
+- `none`: cross-sectional OLS with possible omitted variables or reverse causality. Write "is associated with".
+Identification beats efficiency: prefer the consistent estimator even with larger SEs.
+
+## reviewing a paper's identification (replication mode)
+- **TWFE DID with staggered adoption**: heterogeneous effects can bias the TWFE coefficient (even its sign). Check the event-study pre-trends (`F.x`/leads ≈ 0); mention Callaway-Sant'Anna / Sun-Abraham / de Chaisemartin-D'Haultfœuille as the fix.
+- **Bartik / shift-share instruments**: exogeneity comes from the shares or the shocks — say which the paper relies on.
+- **Lagged x as "endogeneity test"**: mitigates simple reverse causality only; it does not remove omitted persistent factors.
+- **Mechanism (mediation) tables**: X→M and Y on X+M is descriptive; M is post-treatment, so the "indirect effect" is not causally identified without extra assumptions. Sobel tests inherit this problem.
+- **PSM**: balances observables only; check the balance table and common support; matched N should be reported.
+- **Heterogeneity by subgroup**: compare groups with an interaction term (or a Chow / SUR test), not by eyeballing two separate significance stars.
+- **Multiple robustness tables all supporting H1** do not address the same untested assumption — identify the weakest link.
 
 ## Choosing and reporting the final model
 1. The final model is the simplest specification that passes the relevant diagnostics, with valid SE for the remaining issues.

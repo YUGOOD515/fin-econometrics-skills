@@ -1,0 +1,25 @@
+{"case": "easy_lixiaoping", "difficulty": "easy", "type": "replication", "has_dofile": true,
+ "materials": ["论文.pdf", "附录.pdf", "数据.dta", "程序.do"],
+ "source": "李小平等(2026)《中国工业经济》第4期; public data package 李小平/",
+ "targets": [
+  {"label": "表1(1)", "var": "lnmpkl", "coef": -0.0338, "dec": 4, "t": -2.8881, "N": 2560, "w": 2},
+  {"label": "表1(2)", "var": "lnmpkl", "coef": -0.0264, "dec": 4, "t": -6.6501, "N": 2560, "w": 1},
+  {"label": "表1(6)", "var": "lnmpkl", "coef": -0.0171, "dec": 4, "t": -4.8391, "N": 2438, "w": 3},
+  {"label": "附表3(1)", "var": "lnmpkl", "coef": -3.1026, "dec": 4, "N": 1174, "w": 2},
+  {"label": "附表3(2)", "var": "lnmpkl", "coef": -0.2503, "dec": 4, "N": 2109, "w": 1},
+  {"label": "附表3(3)", "var": "lnmpkl", "coef": -0.0268, "dec": 4, "N": 2270, "w": 1},
+  {"label": "附表3(4)", "var": "lnmpkl", "coef": -0.0901, "dec": 4, "N": 2382, "w": 2}
+ ],
+ "verdict_ok": ["replicated", "largely replicated", "完全复现", "基本复现"],
+ "critique_keywords": [
+  {"name": "weak_iv_col1", "any": ["Stock-Yogo", "19.93", "弱工具", "弱识别"], "w": 2},
+  {"name": "iv_magnitude_red_flag", "any": ["100倍", "180倍", "量级", "远大于", "数量级", "-3.10", "−3.10", "-3.1026"], "w": 1},
+  {"name": "time_invariant_iv", "any": ["时不变", "不随时间", "1970", "截面工具", "滞后项"], "w": 1},
+  {"name": "exclusion", "any": ["排他性", "exclusion"], "w": 2},
+  {"name": "unsupported_gmm_noted", "any": ["xtabond", "GMM", "xtdpdsys"], "w": 1}
+ ],
+ "rubric": ["Ran the authors' do-file through ek stata; matched Table 1 (6 cols) and 附表3 (4 cols) to 4 decimals incl. t and Anderson LM / CD F",
+            "Flags that col (1) IV is weak given 2 instruments (CD 10.31 < Stock-Yogo 19.93) and the -3.10 coefficient is ~180x OLS",
+            "Notes 1970 instruments are time-invariant (lags only trim the sample; FE absent in cols 1-2) and exclusion restriction is doubtful (historical books/education affect inequality directly)",
+            "Notes Bartik/leave-one-out IVs' exclusion threats (global common shocks); reports unsupported GMM honestly",
+            "Overall verdict: numbers replicated; direction of conclusion consistent; causal claim only suggestive"]}

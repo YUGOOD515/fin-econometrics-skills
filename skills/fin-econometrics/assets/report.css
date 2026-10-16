@@ -30,3 +30,6 @@ code{font-size:.9em;background:var(--line);padding:0 var(--s1);border-radius:4px
 a{color:var(--blue)}
 footer{margin-top:var(--s8);color:var(--ink-2);font-size:13px}
 @media (max-width:640px){h1{font-size:30px}.hero{grid-template-columns:1fr}.kpi{font-size:48px}main{padding:var(--s7) var(--s4)}}
+table.reg tr.st-differs td{background:#fdecea}
+table.reg tr.st-missing td{background:#fff6e0}
+table.reg tr.st-close td{background:#f3f8ee}

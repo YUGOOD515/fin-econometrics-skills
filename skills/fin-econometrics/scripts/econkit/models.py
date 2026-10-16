@@ -181,6 +181,32 @@ def fit_iv(a, df, estimator="2sls"):
         dg["weak_iv_rule"] = "first-stage F < 10 => weak instruments (Staiger-Stock); prefer LIML / report AR-robust inference"
     except Exception as e:
         dg["first_stage_error"] = str(e)
+    # Stata-style (ivreg2) weak-ID battery: Sanderson-Windmeijer F per endog, Cragg-Donald, Kleibergen-Paap, AR
+    if lm_cov != "kernel":
+        try:
+            from . import hdfe
+            vce = {"unadjusted": "iid", "robust": "robust", "clustered": "cluster"}[lm_cov]
+            r = hdfe.estimate(d, a.y, exog, a.endog, a.instruments, fe=None, vce=vce,
+                              cluster=[[a.cluster]] if vce == "cluster" else None, convention="ivreg2",
+                              constant=not a.noconst, small=True, estimator="liml" if estimator == "liml" else "2sls")
+            iv = r.get("iv", {})
+            keep = {k: iv[k] for k in ("cragg_donald_F", "kp_rk_LM", "kp_rk_LM_p", "kp_rk_Wald_F", "AR_F", "AR_p",
+                                        "endogeneity_test") if k in iv}
+            keep["first_stage"] = [{k: f[k] for k in ("endog", "partial_F", "SW_F", "partial_R2")}
+                                   for f in iv.get("first_stage", [])]
+            lmfs = dg.get("first_stage", {})
+            dg["first_stage"] = {f["endog"]: {"partial_F": f["partial_F"], "SW_F": f["SW_F"], "partial_r2": f["partial_R2"],
+                                              "shea_r2": lmfs.get(f["endog"], {}).get("shea_r2")} for f in keep.pop("first_stage")}
+            dg["first_stage_note"] = "partial_F / SW_F follow ivreg2 (robust/cluster-consistent, small-sample scaled)"
+            dg.update(keep)
+            if "weak_iv_flag" in iv:
+                sw_min = min([v["SW_F"] for v in dg["first_stage"].values()] or [np.inf])
+                dg["weak_iv_flag"] = bool(iv["weak_iv_flag"] or sw_min < 10)
+                dg["weak_iv_rule"] = ("weak-ID: Kleibergen-Paap rk Wald F (robust/cluster) or Cragg-Donald F (iid) < 10, "
+                                      "or any Sanderson-Windmeijer F < 10 with several endogenous regressors; "
+                                      "compare with Stock-Yogo critical values; then prefer LIML and report AR-robust inference")
+        except Exception as e:
+            dg["stata_style_error"] = str(e)[:200]
     n_over = len(a.instruments) - len(a.endog)
     dg["overid_df"] = n_over
     if n_over > 0:

@@ -1,6 +1,6 @@
 ---
 name: fin-econometrics
-description: End-to-end applied econometrics for economic and financial data. Acquires data (user files, FRED, World Bank, web tables), profiles it, runs a baseline regression, then detects and treats heteroskedasticity, autocorrelation, non-stationarity, endogeneity (IV/2SLS/LIML), panel effects and binary outcomes, and delivers a defensible final model, plain-language conclusions, charts and a single-file HTML data story. Use when the user asks to analyze, regress or model economic/financial data, test an economic hypothesis or causal effect, check OLS assumptions, or turn empirical results into a report or public-facing story. Not for pure ML forecasting or price prediction.
+description: End-to-end applied econometrics for economic and financial data, including replication of published empirical papers. Runs Stata do-files or Stata-syntax commands without Stata (reg, reghdfe, xtreg, ivreg2/ivreghdfe, probit/logit, ppmlhdfe, tobit, psmatch2 ...), checks the results against the paper's tables, and judges whether the conclusions hold. For independent analysis it acquires data (user files, FRED, World Bank, web tables), runs a baseline, detects and treats heteroskedasticity, autocorrelation, non-stationarity, endogeneity (IV/2SLS/LIML), panel effects and binary outcomes, and delivers a defensible final model, plain-language conclusions and a single-file HTML report. Use when the user asks to replicate/reproduce a paper (复现论文), run a .do file, analyze or regress economic/financial data, test a hypothesis or causal effect, check OLS assumptions, or write up empirical results. Not for pure ML forecasting or price prediction.
 ---
 
 # Financial Econometrics Analyst
@@ -14,14 +14,22 @@ regression or test code when an `ek` command exists, so results are reproducible
 ```bash
 SKILL_DIR="<absolute path of this folder>"
 EK="python $SKILL_DIR/scripts/ek.py"
-python -c "import statsmodels, linearmodels, scipy, plotly, matplotlib" 2>/dev/null \
+python -c "import statsmodels, linearmodels, scipy, plotly, matplotlib, pyfixest" 2>/dev/null \
   || pip install -q -r "$SKILL_DIR/requirements.txt"
-mkdir -p analysis && cd analysis          # all outputs live here; ek writes to ./ek_out
 ```
+Work in the folder the user gave you (otherwise create `analysis/`). `ek` writes to `./ek_out`
+and logs every command to `ek_out/history.sh`, so the analysis can be replayed.
 
-Append every `ek` command you run to `run.sh` so the analysis can be replayed.
+## Choose the mode
+- **R — Replicate a paper** (the user supplies a paper and/or its data, do-file, log, or asks
+  to 复现): read `references/replication.md` and follow it. In short: extract the design and
+  the table numbers → `targets.json` → `$EK stata --do 程序.do` (or your own `analysis.do`
+  written from the paper) → `$EK check --targets targets.json` → explain deviations →
+  judge identification and whether the conclusions hold → replication report.
+- **A — Independent analysis** (a question plus data): the workflow below.
+Both modes share the hard rules, `references/decision-rules.md`, and the deliverables.
 
-## Workflow
+## Workflow (mode A)
 
 Follow the stages in order. Each stage has a gate: do not move on until it is met.
 
@@ -85,6 +93,15 @@ $EK compare --fits ek_out/fits/a.json ek_out/fits/b.json --keep X1 X2 --out tabl
 3. A short answer to the user in their language: the headline, the effect size in plain units,
    how much to trust it, and the caveats.
 
+## Stata-syntax engine (both modes)
+`$EK stata --do file.do` or `$EK stata --data d.dta --cmd "reghdfe y x c, absorb(id year) vce(cl id)"`
+runs Stata commands in Python with Stata's own conventions (dof, small-sample scaling, singleton
+dropping, KP/CD/AR weak-IV statistics), writing `ek_out/stata/stata_results.md` and
+`stata_estimates.json`. Prefer it whenever the user thinks in Stata terms or a paper's
+specification is written in Stata; it is also the quickest way to run FE panels with absorbed
+effects and post-estimation `test`/`lincom`. Unsupported commands produce a warning, never a
+silent skip.
+
 ## Hard rules
 - Interpret magnitudes in units: log-log means elasticity; in log-level, 100·b is a
   % change; give economic significance (for example, the effect of a one-SD change), not just stars.
@@ -96,10 +113,13 @@ $EK compare --fits ek_out/fits/a.json ek_out/fits/b.json --keep X1 X2 --out tabl
 - Do not keep re-specifying until p < 0.05. Report the specifications you tried.
 - If an `ek` command errors, read the JSON `error`/`available` fields and fix the call; do
   not fall back to ad-hoc code unless the method is missing from ek (say so in caveats).
+- Identification beats efficiency: a consistent estimator with larger SEs is preferred to an
+  efficient one that is biased. Never pick a specification because it reproduces the paper's stars.
 
 ## analysis.json schema
 ```json
 {
+  "mode": "analysis|replication",
   "question": "...", "y": "...", "key_x": ["..."],
   "data": {"file": "...", "source": "...", "n": 0, "structure": "cross_section|time_series|panel"},
   "issues_detected": ["heteroskedasticity", "autocorrelation", "endogeneity", "..."],
@@ -110,7 +130,10 @@ $EK compare --fits ek_out/fits/a.json ek_out/fits/b.json --keep X1 X2 --out tabl
   "key_findings": [{"variable": "...", "coef": 0.0, "se": 0.0, "p": 0.0, "interpretation": "..."}],
   "causal_claim": "none|suggestive|credible",
   "caveats": ["..."],
-  "story": {"headline": "...", "report": "report.html"}
+  "story": {"headline": "...", "report": "report.html"},
+  "replication": {"verdict": "replicated|largely replicated|partially replicated|not replicated",
+                  "counts": {}, "sign_significance": {}, "deviations": ["..."],
+                  "conclusions_supported": "yes|partly|no", "why": "..."}
 }
 ```
 Canonical issue names: `heteroskedasticity, autocorrelation, nonstationarity, functional_form,
@@ -121,3 +144,5 @@ multicollinearity, influential_obs, endogeneity, weak_instruments, panel_effects
 {nonrobust,robust,hc3,hac,cluster} --lags --cluster --label --query --freq`.
 Lag and difference operators (these need `--time`): `L.x`, `L2.x`, `D.x`, `F.x`.
 Models: `ols wls fgls prais corc 2sls liml gmm fe twfe re pooled logit probit`.
+`final_model.fit_file` may also point to an `ek stata` estimate: `ek_out/stata/stata_estimates.json#m1`
+(stored name or id); `diagnose` saves its baseline as `ek_out/fits/<label>.json`.

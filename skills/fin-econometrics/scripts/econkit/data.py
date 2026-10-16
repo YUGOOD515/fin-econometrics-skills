@@ -18,13 +18,20 @@ def load(path, sheet=None):
         df = pd.read_excel(path, sheet_name=sheet or 0)
     elif ext == ".dta":
         df = pd.read_stata(path, convert_categoricals=False)
+        try:
+            with pd.io.stata.StataReader(path) as rd:
+                df.attrs["labels"] = {k: v for k, v in rd.variable_labels().items() if v}
+        except Exception:
+            pass
     elif ext == ".parquet":
         df = pd.read_parquet(path)
     elif ext == ".json":
         df = pd.read_json(path)
     else:
         fail(f"unsupported file type: {ext}")
+    labs = df.attrs.get("labels", {})
     df.columns = [str(c).strip() for c in df.columns]
+    df.attrs["labels"] = labs
     return df
 
 
@@ -86,10 +93,14 @@ def prepare(df, y, x, extra=(), time=None, entity=None, query=None):
 
 def profile(df, max_cols=60):
     cols = []
+    if len(df.columns) > max_cols:
+        pass
     for c in list(df.columns)[:max_cols]:
         s = df[c]
         info = {"name": c, "dtype": str(s.dtype), "missing": int(s.isna().sum()),
                 "unique": int(s.nunique(dropna=True))}
+        if df.attrs.get("labels", {}).get(c) and df.attrs["labels"][c] != c:
+            info["label"] = df.attrs["labels"][c]
         if pd.api.types.is_numeric_dtype(s):
             d = s.describe()
             info.update({k: float(d[k]) for k in ("mean", "std", "min", "50%", "max") if k in d})
@@ -111,7 +122,8 @@ def profile(df, max_cols=60):
         structure = "panel"
     elif time_c:
         structure = "time_series"
-    return {"shape": list(df.shape), "columns": cols, "structure_guess": structure,
+    extra = {"columns_not_shown": list(df.columns)[max_cols:]} if len(df.columns) > max_cols else {}
+    return {"shape": list(df.shape), "columns": cols, **extra, "structure_guess": structure,
             "time_candidates": time_c, "entity_candidates": id_c}
 
 

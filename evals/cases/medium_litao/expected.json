@@ -1,0 +1,22 @@
+{"case": "medium_litao", "difficulty": "medium", "type": "replication", "has_dofile": false,
+ "materials": ["论文.pdf (1195.pdf)", "数据.dta"],
+ "source": "李涛 宋鸽 金星晔 王海军(2026)《世界经济》第4期; 复现包 1论文最终数据集与程序代码/数据.dta",
+ "targets": [
+  {"label": "表3(1)", "var": "Fund", "coef": 0.103, "dec": 3, "se": 0.023, "N": 35916, "w": 2},
+  {"label": "表3(2)", "var": "Fund", "coef": 0.064, "dec": 3, "se": 0.025, "N": 35916, "w": 3},
+  {"label": "表3(3)", "var": "Fund", "coef": 0.064, "dec": 3, "se": 0.026, "N": 35916, "w": 1},
+  {"label": "表3(4)", "var": "Fund", "coef": 0.064, "dec": 3, "se": 0.034, "N": 35916, "w": 1},
+  {"label": "表3(5)", "var": "Fund", "coef": 0.064, "dec": 3, "se": 0.032, "N": 35916, "w": 1}
+ ],
+ "verdict_ok": ["replicated", "largely replicated", "完全复现", "基本复现"],
+ "critique_keywords": [
+  {"name": "staggered_did", "any": ["交错", "多期DID", "多期 DID", "异质性处理效应", "Callaway", "Sun", "de Chaisemartin", "Goodman-Bacon", "负权重"], "w": 2},
+  {"name": "pretrend", "any": ["平行趋势", "事件研究", "event study", "pre-trend"], "w": 1},
+  {"name": "selection", "any": ["选择偏误", "样本选择", "自选择", "非随机", "PSM", "倾向得分"], "w": 2},
+  {"name": "few_clusters", "any": ["33个", "33 个", "聚类数", "簇数", "少数聚类", "wild"], "w": 1}
+ ],
+ "rubric": ["Inferred the specification from the paper (reghdfe Quality_20W on Fund + 8 winsorized controls, firm & year FE, keepsingleton, clusters province/city/industry/firm) and matched coefficients and SEs",
+            "Replicated one endogeneity/robustness table (PSM-DID, Heckman, alternative quality measures) and compared",
+            "Main concern: staggered treatment timing with TWFE (heterogeneous effects), selection into 专精特新 designation; proposes event-study / CS-DID / Sun-Abraham",
+            "Notes only 33 province clusters; suggests wild bootstrap",
+            "Overall verdict and conclusion support stated with appropriate hedging"]}
