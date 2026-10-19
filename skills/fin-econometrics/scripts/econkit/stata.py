@@ -13,9 +13,11 @@ import pandas as pd
 from .stexpr import _isstr
 from scipy import stats
 
-from . import stexpr
+from . import stexpr, stata_ext
 from .hdfe import estimate, group_codes
 from .common import _clean
+import warnings
+warnings.simplefilter("ignore", pd.errors.PerformanceWarning)
 
 OUTPUT_ONLY = {"esttab", "estout", "estadd", "outreg2", "outreg", "logout", "display", "di", "dis", "set", "cd",
                "log", "graph", "twoway", "tw", "scatter", "line", "histogram", "hist", "coefplot", "binscatter",
@@ -26,9 +28,9 @@ OUTPUT_ONLY = {"esttab", "estout", "estadd", "outreg2", "outreg", "logout", "dis
                "inspect", "sum2docx", "corr2docx", "reg2docx", "t2docx", "tabout", "outsheet", "export", "lookfor", "ds", "misstable", "mvencode", "cap", "noi", "estimates", "est",
                "eststo", "estpost", "asdoc", "local", "global", "scalar", "drop", "keep"}
 EXTRA_EST = {"newey", "qreg", "tobit", "ologit", "oprobit", "mlogit", "clogit", "xtlogit", "psmatch2"}
-UNSUPPORTED = {"xtabond", "xtdpdsys", "xtdpd", "xtabond2", "sensemakr", "bdiff", "teffects",
-               "didregress", "xtdidregress", "csdid", "did_multiplegt", "eventdd", "rdrobust", "synth",
-               "heckman", "sqreg", "xtqreg", "spxtregress", "xsmle", "gmm", "sem", "gsem", "boottest",
+UNSUPPORTED = {"xtdpd", "bdiff", "teffects",
+               "didregress", "xtdidregress", "eventdd", "rdrobust", "synth",
+               "heckman", "sqreg", "xtqreg", "spxtregress", "xsmle", "gmm", "sem", "gsem",
                "bootstrap", "permute", "simulate", "ritest", "xtgls", "xtpcse", "arima", "var", "vec",
                "garch", "xtunitroot", "xtcointtest", "xttobit",
                "xtprobit", "ivprobit", "biprobit", "medeff", "khb", "estat"}
@@ -528,6 +530,12 @@ class Session:
             for n, s in pcs:
                 E[n] = s.values
             return [n for n, _ in pcs]
+        mg = re.match(r"^((?:[LFDSlfds]\d*)+|[LFDSlfds]\([\d/ ]+\))\.\((.+)\)$", term)
+        if mg:  # operator applied to a group: L.(a b), L(0/2).(k ys)
+            names = []
+            for v in self.tokens(mg.group(2)):
+                names += self.term_columns(mg.group(1) + "." + v, E)
+            return names
         m = re.match(r"^([LFDSlfds])\(([\d/ ]+)\)\.(.+)$", term)
         if m:
             op, rng, var = m.groups()
@@ -926,6 +934,11 @@ class Session:
             if self.vce_variants and self.last is not None and c not in ("sgmediation2", "sgmediation", "psmatch2"):
                 self._vce_scan(ln, c, rest, line)
             return out
+        if c in stata_ext.COMMANDS:
+            if self.est_filter and c not in stata_ext.POST and not self.est_filter.search(line):
+                self.last = None
+                self.log(ln, line, "skipped", "filtered out by --est-filter"); return
+            return stata_ext.dispatch(self, ln, c, rest, line, eststo_name)
         if c in UNSUPPORTED:
             self.log(ln, line, "warning", f"command '{c}' not supported by ek stata: run it in Stata or implement manually (see references/replication.md)")
             return
@@ -1535,6 +1548,9 @@ class Session:
                                weights=weights, wtype=wtype, convention=conv, drop_singletons=drop_single,
                                constant=constant, small=small, estimator=("liml" if est_kind == "liml" else "2sls"))
                 ridx = res.pop("_index")
+                if not enn and c not in ("sgmediation2", "sgmediation"):
+                    res["_boot"] = {"E": Ed.loc[ridx], "y": ycol, "x": list(exn), "fe": fe, "cluster": clcols,
+                                    "weights": weights, "constant": constant, "vce": vce}
                 rname = getopt(opts, "res:residuals")
                 if rname and rname is not True:
                     rr = pd.Series(np.nan, index=df.index); rr[ridx] = res.get("_resid")
@@ -1851,6 +1867,8 @@ class Session:
             out.append(f"| _cons | {r['coefs']['_cons']['coef']:.4f} | | | | |")
         if nd:
             out.append(f"| ({nd} factor dummies hidden) | | | | | |")
+        if r.get("extra_lines"):
+            out += [""] + list(r["extra_lines"])
         iv = r.get("iv")
         if iv:
             s = [f"KP rk LM={iv.get('kp_rk_LM', float('nan')):.4f} (p={iv.get('kp_rk_LM_p', float('nan')):.4f})",

@@ -150,6 +150,23 @@ def _cluster_sum(S, c):
     return Sg.T @ Sg, c.max() + 1
 
 
+def cgm_meat(S, clusters):
+    """Multiway (Cameron-Gelbach-Miller) cluster meat sum_r (-1)^(r+1) sum_{|c|=r} S_c'S_c, PSD-projected."""
+    from itertools import combinations
+    k = len(clusters)
+    if k == 1:
+        return _cluster_sum(S, clusters[0])[0]
+    M = np.zeros((S.shape[1], S.shape[1]))
+    for r in range(1, k + 1):
+        for comb in combinations(range(k), r):
+            cc = clusters[comb[0]] if r == 1 else group_codes(pd.DataFrame({i: clusters[i] for i in comb}), list(comb))
+            M += (1 if r % 2 == 1 else -1) * _cluster_sum(S, cc)[0]
+    ev, U = np.linalg.eigh((M + M.T) / 2)
+    if (ev < 0).any():
+        M = U @ np.diag(np.clip(ev, 0, None)) @ U.T
+    return M
+
+
 def sandwich(bread, S, kind, clusters=None, scale_fn=None):
     """kind: iid handled outside; 'robust' or 'cluster'. scale_fn(G) -> multiplier."""
     if kind == "robust":
@@ -543,9 +560,7 @@ def kp_rk(X, Z, vce, cl, N, wald=True):
         if vce == "robust":
             shat = Sc.T @ Sc / N
         else:
-            c = _recode(cl[0])
-            Sg = np.zeros((c.max() + 1, Sc.shape[1])); np.add.at(Sg, c, Sc)
-            shat = Sg.T @ Sg / N
+            shat = cgm_meat(Sc, cl) / N
     Ik = np.eye(K)
     vpi = np.kron(Ik, zzi) @ shat @ np.kron(Ik, zzi)       # avar of sqrt(N) vec(pihat)
     T = np.kron(np.linalg.inv(xhalf).T, zhalf)
@@ -607,7 +622,7 @@ def iv_diagnostics(y, Xen, Zx, W, e, b_en, vce, cl, N, small, df_a, endog, instr
     K2, L2 = Xen.shape[1], Zx.shape[1]
     L = L2 + W.shape[1] + df_a  # total instruments incl. exogenous & absorbed (ivreg2: L incl. partialled)
     Xp, Zp, yp = _partial(Xen, W), _partial(Zx, W), _partial(y[:, None], W)[:, 0]
-    G = len(np.unique(cl[0])) if (vce == "cluster" and cl) else None
+    G = min(len(np.unique(c)) for c in cl) if (vce == "cluster" and cl) else None  # multiway: G = min
     out = {"n_endog": K2, "n_excluded_instruments": L2, "overid_df": L2 - K2}
     # first stages
     fs = []
@@ -686,7 +701,7 @@ def iv_diagnostics(y, Xen, Zx, W, e, b_en, vce, cl, N, small, df_a, endog, instr
         else:
             Sc = Zfull * ep[:, None]
             if vce == "cluster":
-                c = _recode(cl[0]); Sg = np.zeros((c.max() + 1, Sc.shape[1])); np.add.at(Sg, c, Sc); Sm = Sg.T @ Sg
+                Sm = cgm_meat(Sc, cl)
             else:
                 Sm = Sc.T @ Sc
             Wm = _inv(Sm)

@@ -81,7 +81,10 @@ Textbook pointers: Chen Q. (2023) *Econometrics and Stata Applications*, 2nd ed.
 Identification beats efficiency: prefer the consistent estimator even with larger SEs.
 
 ## reviewing a paper's identification (replication mode)
-- **TWFE DID with staggered adoption**: heterogeneous effects can bias the TWFE coefficient (even its sign). Check the event-study pre-trends (`F.x`/leads ≈ 0); mention Callaway-Sant'Anna / Sun-Abraham / de Chaisemartin-D'Haultfœuille as the fix.
+- **TWFE DID with staggered adoption**: heterogeneous effects can bias the TWFE coefficient (even its sign). Check the event-study pre-trends (`F.x`/leads ≈ 0); estimate Callaway-Sant'Anna / Sun-Abraham / de Chaisemartin-D'Haultfœuille (`csdid`, `eventstudyinteract`, `did_multiplegt_dyn` in `ek stata`) and compare with TWFE.
+- **Few clusters (< ~40)**: add `boottest` (wild cluster bootstrap, Webb weights) for the key coefficient.
+- **Dynamic panels (L.y as regressor with FE)**: Nickell bias; use `xtabond2` and report AR(2), Hansen p, instrument count < groups.
+- **Selection on unobservables**: `sensemakr` robustness value with a named benchmark covariate.
 - **Bartik / shift-share instruments**: exogeneity comes from the shares or the shocks — say which the paper relies on.
 - **Lagged x as "endogeneity test"**: mitigates simple reverse causality only; it does not remove omitted persistent factors.
 - **Mechanism (mediation) tables**: X→M and Y on X+M is descriptive; M is post-treatment, so the "indirect effect" is not causally identified without extra assumptions. Sobel tests inherit this problem.

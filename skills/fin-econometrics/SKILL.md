@@ -110,6 +110,10 @@ how an instrument is built (time-invariant? varies only at city×year? rank-1 sh
 left after FE?); IV output includes Stock-Yogo flags and an Anderson-Rubin 95% confidence set
 (`AR_CI95`). For paper replication always estimate with `ek stata` (its SE conventions follow
 Stata; `ek fit`'s cluster dof differs slightly).
+**Advanced estimators (v0.3)** — read `references/advanced-methods.md` before using them: dynamic panel
+GMM (`xtabond`, `xtdpdsys`, `xtabond2`: AR(2), Hansen, instrument count), heterogeneity-robust DID
+(`csdid`, `eventstudyinteract`, `did_multiplegt_dyn`), wild cluster bootstrap for few clusters
+(`boottest`), omitted-variable sensitivity (`sensemakr`), and multiway-clustered IV.
 
 ## Hard rules
 - Interpret magnitudes in units: log-log means elasticity; in log-level, 100·b is a

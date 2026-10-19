@@ -86,12 +86,13 @@ Also available: `tempfile/tempvar` + `` `name' `` macros, `xtsum` (overall/betwe
 4. Report what you had to guess. If coefficients match but t-values do not, the SE convention
    differs; say which one reproduces the paper.
 
-Unsupported (warning, not silently skipped): GMM dynamic panels (`xtabond`, `xtabond2`,
-`xtdpdsys`), modern DID (`csdid`, `did_multiplegt`), `rdrobust`, `synth`, `sensemakr`, `boottest`,
+Supported since v0.3 (see `references/advanced-methods.md`): `xtabond`, `xtdpdsys`, `xtabond2`,
+`csdid`, `eventstudyinteract`, `did_multiplegt(_dyn)`, `boottest`, `sensemakr`.
+Unsupported (warning, not silently skipped): `xtdpd`, `rdrobust`, `synth`,
 `heckman` (do the two-step by hand: probit → `predict xb` → `gen imr = normalden(xb)/normal(xb)` →
-OLS with `imr`), `bootstrap`, quantile panels, spatial models. Dynamic panels: mark the table
-**未复现** and, if useful, give the Anderson-Hsiao IV as an approximate check
-(`ivreghdfe D.y D.x (LD.y = L2.y), cluster(id)`), labelled "approximate".
+OLS with `imr`), `bootstrap`, quantile panels, spatial models. Dynamic panels: run the paper's `xtabond2` line as written; if
+the paper omits the instrument set, try `collapse` / lag limits and report which one reproduces the
+table, plus AR(2), Hansen p and the instrument count vs groups.
 `egen` functions: mean sd sum/total count min max median pctile iqr mode rank group tag std and
 row* (rowmean rowtotal ...). String cluster/FE variables work directly (or `egen g = group(s)`).
 `ivreghdfe ..., small` reproduces `xtivreg, fe` iid SE with t statistics.
@@ -124,7 +125,7 @@ Even when the numbers match, re-run the key columns with (a) SE clustered at the
 city / country) level if the paper used robust or iid SE, and (b) for IV, the same clustering —
 `xtivreg, fe` and `ivreg2` without `cluster()` assume iid errors, so their Cragg-Donald F overstates
 instrument strength for panel data; report the clustered KP rk Wald F and the AR test. Few clusters
-(< ~40, e.g. provinces): say so and suggest wild-cluster bootstrap (`boottest`, not supported).
+(< ~40, e.g. provinces): say so and run `boottest x, weight(webb)` after the key regression and report the bootstrap p and CI.
 
 ## 4c. IV construction checklist
 Run `$EK ivcheck --data d.dta --z Z1 Z2 --x X --y Y --entity id --time year --levels city province
@@ -158,8 +159,9 @@ test 1.relp 2.relp 3.relp 4.relp                          // joint pre-trend tes
 Run with `--keep-dummies` to list the event-time coefficients (factor dummies are hidden by default).
 3. Heterogeneous-timing bias: TWFE compares late with early adopters. A cheap check is the
    stacked / clean-control estimate: keep never-treated + one cohort at a time, estimate, average.
-   Name Callaway-Sant'Anna / Sun-Abraham / de Chaisemartin-D'Haultfœuille (`csdid`,
-   `did_multiplegt` are not supported) as the full fix.
+   The full fix: `csdid y, ivar(id) time(year) gvar(first) agg(event)` (gvar 0 = never treated),
+   `eventstudyinteract` or `did_multiplegt_dyn` (treatment switching); compare with the TWFE number
+   and report the pre-period placebo test.
 4. Selection into treatment: compare pre-period means of treated vs control; PSM-DID only
    balances observables. Author data often carry the matched-sample flag (`psm_*`, `_weight`,
    `_support`): reproduce PSM-DID with `if flag==1` instead of re-matching.

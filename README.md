@@ -19,7 +19,11 @@ Two modes:
   foreach/forvalues, winsor2, encode/destring, tab gen()`, factor variables and `L./F./D.` operators.
   Estimators: `reg areg reghdfe xtreg(fe/re) ivreghdfe ivreg2 ivregress xtivreg probit logit poisson
   nbreg ppmlhdfe newey qreg tobit ologit oprobit mlogit clogit xtlogit(fe) psmatch2 sgmediation2`,
-  plus `test testparm lincom nlcom predict est store/eststo`. IV output includes first-stage F,
+  plus `test testparm lincom nlcom predict est store/eststo`.
+  **v0.3**: dynamic panel GMM `xtabond xtdpdsys xtabond2` (Windmeijer SE, AR tests, Sargan/Hansen,
+  difference-in-Hansen), heterogeneity-robust DID `csdid eventstudyinteract did_multiplegt(_dyn)`,
+  wild cluster bootstrap `boottest`, omitted-variable sensitivity `sensemakr`, multiway-clustered IV
+  (validated: `evals/RESULTS-v0.3.md`, 48/48 checks). IV output includes first-stage F,
   Sanderson-Windmeijer F, Cragg-Donald, Kleibergen-Paap LM/Wald F, Anderson-Rubin, Hansen J.
 - `ek check` — compares estimates with the paper's printed numbers (keeps the paper's rounding and
   stars) and returns a verdict: replicated / largely / partially / not replicated, plus
@@ -60,5 +64,6 @@ For other harnesses, copy `skills/fin-econometrics/` into the folder where that 
 | medium_litao | replication | medium | paper + data, no code: staggered DID, clustering levels, singletons |
 | hard_overtime | replication | hard | paper + data, no code: areg + xtivreg fe, weak IV, IV ≫ OLS |
 
-`python evals/grade.py evals/cases/<case> <run_dir>` scores a run. Replication cases need the
+`python evals/grade.py evals/cases/<case> <run_dir>` scores a run. `python3 evals/v03/bench.py`
+re-checks the v0.3 estimators against published / reference-package numbers. Replication cases need the
 papers' public data packages (not redistributed here; see each case's `expected.json` → `source`).
